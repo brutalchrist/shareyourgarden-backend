@@ -1,0 +1,19 @@
+version: '2.0'
+services:
+  mongodb:
+    image: 'bitnami/mongodb:3.6'
+    ports:
+      - "27017:27017"
+    labels:
+      kompose.service.type: nodeport
+    environment:
+      - MONGODB_ROOT_PASSWORD=shareyourgarden
+      - MONGODB_USERNAME=shareyourgarden
+      - MONGODB_PASSWORD=shareyourgarden
+      - MONGODB_DATABASE=shareyourgarden
+    networks:
+      - app
+
+networks:
+  app:
+    driver: bridge
