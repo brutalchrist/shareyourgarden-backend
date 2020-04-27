@@ -9,6 +9,10 @@
  */
 
 module.exports.routes = {
-
-
+  '/*':  {
+    cors: {
+      allowOrigins: '*',
+      allowRequestMethods: 'GET,PUT,POST,OPTIONS,HEAD'
+    }
+  }
 };
