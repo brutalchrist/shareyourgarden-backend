@@ -8,6 +8,7 @@
 module.exports = {
   find: function(req, res) {
     const polygon = req.param('polygon');
+    const where = req.param('where') || '';
 
     if (typeof polygon === 'undefined') {
       Gardens.find().exec((error, result) => {
@@ -28,7 +29,17 @@ module.exports = {
         return res.json({error: 'polygon: a minimum of 4 points was expected'});
       }
 
+
+      const $regex = `.*${where}.*`;
+      const $options = 'i';
+
       var query = {
+        $or: [
+          { name: { $regex, $options }},
+          { 'products.name': { $regex, $options }},
+          { 'products.type': { $regex, $options }},
+          { 'owner.name': { $regex, $options }}
+        ],
         location: {
           $geoWithin: {
             $geometry: {
