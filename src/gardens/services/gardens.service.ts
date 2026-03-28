@@ -10,7 +10,7 @@ export class GardensService {
 
   mapEntityToDto(garden: Garden): GardensDto {
     const response = new GardensDto();
-    response.id = garden._id as string;
+    response.id = String(garden._id);
     response.name = garden.name;
     response.products = garden.products;
     response.owner = garden.owner;
