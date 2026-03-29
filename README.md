@@ -1,76 +1,79 @@
 # shareyourgarden-backend
 
-Backend API (NestJS + MongoDB) para ShareYourGarden.
+Backend NestJS con OAuth2 Google en modo **broker backend** (redirect fijo del API), compatible con dominios variables de Netlify Deploy Previews.
 
-## Configuración
+## Variables de entorno
 
-1. Copia variables de entorno:
+Copia `.env.example` a `.env`.
 
-```bash
-cp .env.example .env
-```
+Variables requeridas:
 
-2. Ajusta valores en `.env`:
-
-- `MONGODB_URI`
 - `GOOGLE_CLIENT_ID`
 - `GOOGLE_CLIENT_SECRET`
-- `GOOGLE_ALLOWED_REDIRECT_URIS` (CSV)
-- `JWT_SECRET`
-- `JWT_EXPIRES_IN`
-- `GOOGLE_AUTH_RATE_LIMIT_MAX` (opcional)
-- `GOOGLE_AUTH_RATE_LIMIT_WINDOW_MS` (opcional)
+- `GOOGLE_REDIRECT_URI` (callback fijo backend, ej. `https://api.tudominio.com/auth/google/callback`)
+- `FRONTEND_RETURN_TO_ALLOWLIST` (CSV de orígenes permitidos; soporta `*`)
+- `SESSION_SECRET`
 
-## Scripts
+## Google Cloud Console (OAuth)
+
+1. En **APIs & Services > Credentials**, crea OAuth Client (Web application).
+2. En **Authorized redirect URIs**, agrega el callback backend fijo:
+   - `https://api.tudominio.com/auth/google/callback`
+3. En **Authorized JavaScript origins** agrega solo los orígenes que usen flujo browser directo (si aplica).
+4. Usa el `Client ID` y `Client Secret` en `.env`.
+
+## Endpoints de auth broker
+
+### `GET /auth/google/start?return_to=<frontend_url>`
+Valida `return_to`, firma `state`, setea nonce anti-CSRF y redirige a Google.
+
+### `GET /auth/google/callback`
+Valida `state` + nonce, intercambia `code`, verifica `id_token`, crea sesión con cookie segura y redirige a `return_to`.
+
+### `GET /auth/session`
+Contrato JSON:
+
+```json
+{
+  "authenticated": true,
+  "user": {
+    "sub": "google-sub",
+    "email": "user@example.com",
+    "name": "User",
+    "picture": "https://..."
+  }
+}
+```
+
+O sin sesión:
+
+```json
+{
+  "authenticated": false
+}
+```
+
+### `POST /auth/logout`
+Requiere header `x-csrf-token` que coincida con cookie CSRF. Invalida sesión y limpia cookies.
+
+Contrato JSON:
+
+```json
+{
+  "success": true
+}
+```
+
+## CORS y cookies
+
+- CORS dinámico contra `FRONTEND_RETURN_TO_ALLOWLIST`
+- `Access-Control-Allow-Credentials: true`
+- Cookies de sesión: `HttpOnly`, `Secure`, `SameSite=None`, `Path=/`
+
+## Tests
 
 ```bash
-yarn install
-yarn start:dev
-yarn test
-yarn test:e2e
+yarn lint
+yarn test --runInBand
+yarn test:e2e --runInBand
 ```
-
-## Auth con Google (Authorization Code Flow)
-
-### Endpoint
-
-`POST /auth/google`
-
-### Request
-
-```json
-{
-  "code": "AUTH_CODE_FROM_GOOGLE",
-  "redirectUri": "https://<frontend-origin>"
-}
-```
-
-### Response
-
-```json
-{
-  "user": {
-    "name": "string",
-    "email": "string",
-    "picture": "string",
-    "sub": "string"
-  },
-  "token": "APP_JWT"
-}
-```
-
-### Validaciones y seguridad
-
-- Solo se confía en `code` y `redirectUri` enviados por frontend.
-- `redirectUri` se valida contra `GOOGLE_ALLOWED_REDIRECT_URIS`.
-- Se intercambia el `code` contra Google Token Endpoint.
-- Se verifica `id_token` (firma RS256, issuer, audience, exp, claims).
-- Se aplica rate-limit básico por IP para `/auth/google`.
-
-### Códigos de error esperados
-
-- `400` request inválido (payload)
-- `401` code/token inválido
-- `403` origen/redirectUri no permitido
-- `429` demasiados intentos
-- `500` error interno
