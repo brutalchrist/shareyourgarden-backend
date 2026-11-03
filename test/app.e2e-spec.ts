@@ -29,4 +29,15 @@ describe('AppController (e2e)', () => {
       .expect(200)
       .expect('Hello World!');
   });
+
+  it('adds a code to error responses', () => {
+    return request(app.getHttpServer())
+      .get('/does-not-exist')
+      .expect(404, {
+        statusCode: 404,
+        message: 'Cannot GET /does-not-exist',
+        error: 'Not Found',
+        code: 'NOT_FOUND',
+      });
+  });
 });

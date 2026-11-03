@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model } from 'mongoose';
+import { ErrorCode } from '../../common/errors';
 import { JwtPayload } from '../../auth/dtos/auth.dto';
 import { UsersService } from '../../users/services/users.service';
 import {
@@ -53,19 +54,27 @@ export class GardensService {
     try {
       coordinates = JSON.parse(polygon) as number[][];
     } catch (error) {
-      throw new BadRequestException(`Invalid polygon format: ${error}`, {
-        cause: error,
-      });
+      throw new BadRequestException(
+        {
+          message: `Invalid polygon format: ${error}`,
+          code: ErrorCode.INVALID_POLYGON,
+        },
+        { cause: error },
+      );
     }
 
     if (!Array.isArray(coordinates)) {
-      throw new BadRequestException('polygon: an array was expected');
+      throw new BadRequestException({
+        message: 'polygon: an array was expected',
+        code: ErrorCode.INVALID_POLYGON,
+      });
     }
 
     if (coordinates.length < 4) {
-      throw new BadRequestException(
-        'polygon: a minimum of 4 points was expected',
-      );
+      throw new BadRequestException({
+        message: 'polygon: a minimum of 4 points was expected',
+        code: ErrorCode.INVALID_POLYGON,
+      });
     }
 
     const isPoint = (point: unknown): point is [number, number] =>
@@ -73,9 +82,11 @@ export class GardensService {
       point.length >= 2 &&
       point.slice(0, 2).every((value) => Number.isFinite(value));
     if (!coordinates.every(isPoint)) {
-      throw new BadRequestException(
-        'polygon: every point must be a [longitude, latitude] pair of numbers',
-      );
+      throw new BadRequestException({
+        message:
+          'polygon: every point must be a [longitude, latitude] pair of numbers',
+        code: ErrorCode.INVALID_POLYGON,
+      });
     }
 
     const boxes = this.viewportToBoxes(coordinates);
@@ -161,7 +172,10 @@ export class GardensService {
       : null;
 
     if (!garden) {
-      throw new NotFoundException('Garden not found');
+      throw new NotFoundException({
+        message: 'Garden not found',
+        code: ErrorCode.GARDEN_NOT_FOUND,
+      });
     }
 
     return garden;
@@ -174,7 +188,10 @@ export class GardensService {
     const garden = await this.findGardenOrFail(id);
 
     if (!garden.ownerId || String(garden.ownerId) !== user.sub) {
-      throw new ForbiddenException('You do not own this garden');
+      throw new ForbiddenException({
+        message: 'You do not own this garden',
+        code: ErrorCode.GARDEN_NOT_OWNED,
+      });
     }
 
     return garden;

@@ -2,6 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { OAuth2Client, TokenPayload } from 'google-auth-library';
+import { ErrorCode } from '../../common/errors';
 import { UserDto } from '../../users/dtos/user.dto';
 import { UsersService } from '../../users/services/users.service';
 import { AuthResponseDto, JwtPayload } from '../dtos/auth.dto';
@@ -28,15 +29,24 @@ export class AuthService {
       });
       payload = ticket.getPayload();
     } catch {
-      throw new UnauthorizedException('Invalid Google credential');
+      throw new UnauthorizedException({
+        message: 'Invalid Google credential',
+        code: ErrorCode.INVALID_GOOGLE_CREDENTIAL,
+      });
     }
 
     if (!payload || payload.aud !== audience) {
-      throw new UnauthorizedException('Invalid Google credential');
+      throw new UnauthorizedException({
+        message: 'Invalid Google credential',
+        code: ErrorCode.INVALID_GOOGLE_CREDENTIAL,
+      });
     }
 
     if (!payload.email || !payload.email_verified) {
-      throw new UnauthorizedException('Google email is not verified');
+      throw new UnauthorizedException({
+        message: 'Google email is not verified',
+        code: ErrorCode.GOOGLE_EMAIL_NOT_VERIFIED,
+      });
     }
 
     return payload;

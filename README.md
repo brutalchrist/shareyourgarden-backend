@@ -53,6 +53,49 @@ The app does not start if `GOOGLE_CLIENT_ID` or `JWT_SECRET` is missing.
 
 Access tokens are HS256 JWTs that expire after 7 days. `GET /gardens` stays public.
 
+The user object is `{ id, email, name, picture, locale }`. `locale` is the
+user's language preference: `"es"`, `"en"` or `null` (follow the
+browser/system language, the default). The allowed values live in
+`src/users/users.constants.ts`.
+
+## Users
+
+- `PATCH /users/me` with `Authorization: Bearer <accessToken>` and
+  `{ "locale": "es" | "en" | null }` updates the signed-in user and returns it
+  in the same shape as `GET /auth/me`. Omitted fields are left as they are;
+  any other value or unknown field returns `400`.
+
+## Errors
+
+Error responses keep Nest's `statusCode`, `message` and `error` fields and add
+a stable `code` that clients can translate instead of showing `message`:
+
+```json
+{
+  "statusCode": 404,
+  "message": "Garden not found",
+  "error": "Not Found",
+  "code": "GARDEN_NOT_FOUND"
+}
+```
+
+| Code                        | Status | When                                              |
+| --------------------------- | ------ | ------------------------------------------------- |
+| `VALIDATION_FAILED`         | 400    | The body or query failed validation.              |
+| `INVALID_POLYGON`           | 400    | `GET /gardens` got a malformed `polygon`.         |
+| `UNAUTHORIZED`              | 401    | Missing, invalid or expired access token.         |
+| `INVALID_GOOGLE_CREDENTIAL` | 401    | Google rejected the ID token.                     |
+| `GOOGLE_EMAIL_NOT_VERIFIED` | 401    | The Google account's email is not verified.       |
+| `FORBIDDEN`                 | 403    | Generic forbidden.                                |
+| `GARDEN_NOT_OWNED`          | 403    | Editing or deleting someone else's garden.        |
+| `NOT_FOUND`                 | 404    | Unknown route.                                    |
+| `GARDEN_NOT_FOUND`          | 404    | No garden with that id.                           |
+| `INTERNAL_ERROR`            | 5xx    | Unexpected server error.                          |
+
+Throw sites name a code by passing `{ message, code }` to the Nest exception
+(see `src/common/errors.ts`); otherwise `HttpExceptionFilter` derives it from
+the status (for example `409` becomes `CONFLICT`).
+
 ## Compile and run the project
 
 ```bash
