@@ -5,6 +5,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
+import { ConversationsModule } from './conversations/conversations.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { GardensModule } from './gardens/gardens.module';
 
@@ -12,6 +13,7 @@ import { GardensModule } from './gardens/gardens.module';
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     AuthModule,
+    ConversationsModule,
     GardensModule,
     MongooseModule.forRootAsync({
       inject: [ConfigService],

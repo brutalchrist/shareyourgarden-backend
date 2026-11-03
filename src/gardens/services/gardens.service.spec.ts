@@ -28,6 +28,11 @@ const strangerPayload = {
 const polygon =
   '[[-71.68216466903688,-35.42395867605907],[-71.65750980377199,-35.42395867605907],[-71.65750980377199,-35.43847037153734],[-71.68216466903688,-35.43847037153734],[-71.68216466903688,-35.42395867605907]]';
 
+const publicGardenDto = {
+  ...gardenDtoMock,
+  owner: { name: gardenDtoMock.owner.name },
+};
+
 const newGarden = {
   name: 'Jardin 1',
   products: [{ name: 'Lechuga', type: 'vegetable' as const, quantity: 10 }],
@@ -90,7 +95,13 @@ describe('GardensService', () => {
     it('returns an array of gardens', async () => {
       const result = await service.findGardens(polygon, 'test');
 
-      expect(result).toEqual([gardenDtoMock]);
+      expect(result).toEqual([publicGardenDto]);
+    });
+
+    it("does not expose the owner's email", async () => {
+      const [garden] = await service.findGardens(polygon, 'test');
+
+      expect(garden.owner).toEqual({ name: gardenEntityMock.owner.name });
     });
 
     const polygonFrom = (points: number[][]) => JSON.stringify(points);
@@ -295,24 +306,34 @@ describe('GardensService', () => {
   });
 
   describe('findById', () => {
-    it('returns the garden', async () => {
+    it('returns the garden with the email to its owner', async () => {
       gardenModelMock.findById.mockResolvedValue(gardenEntityMock);
 
-      await expect(service.findById(gardenEntityMock._id)).resolves.toEqual(
-        gardenDtoMock,
-      );
+      await expect(
+        service.findById(ownerPayload, gardenEntityMock._id),
+      ).resolves.toEqual(gardenDtoMock);
+    });
+
+    it("hides the owner's email from other users", async () => {
+      gardenModelMock.findById.mockResolvedValue(gardenEntityMock);
+
+      await expect(
+        service.findById(strangerPayload, gardenEntityMock._id),
+      ).resolves.toEqual(publicGardenDto);
     });
 
     it('raises NotFound when the garden does not exist', async () => {
       gardenModelMock.findById.mockResolvedValue(null);
 
-      await expect(service.findById(gardenEntityMock._id)).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        service.findById(ownerPayload, gardenEntityMock._id),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('raises NotFound for an invalid id', async () => {
-      await expect(service.findById('nope')).rejects.toThrow(NotFoundException);
+      await expect(service.findById(ownerPayload, 'nope')).rejects.toThrow(
+        NotFoundException,
+      );
       expect(gardenModelMock.findById).not.toHaveBeenCalled();
     });
   });

@@ -9,6 +9,12 @@ export const ErrorCode = {
   INVALID_POLYGON: 'INVALID_POLYGON',
   GARDEN_NOT_FOUND: 'GARDEN_NOT_FOUND',
   GARDEN_NOT_OWNED: 'GARDEN_NOT_OWNED',
+  // The garden predates owner ids, so there is nobody to write to.
+  GARDEN_HAS_NO_OWNER: 'GARDEN_HAS_NO_OWNER',
+  CANNOT_CONTACT_OWN_GARDEN: 'CANNOT_CONTACT_OWN_GARDEN',
+  CONVERSATION_NOT_FOUND: 'CONVERSATION_NOT_FOUND',
+  // A message id used as a pagination cursor is not in the conversation.
+  INVALID_MESSAGE_CURSOR: 'INVALID_MESSAGE_CURSOR',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

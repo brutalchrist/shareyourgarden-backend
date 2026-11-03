@@ -40,8 +40,8 @@ export class GardensController {
 
   @Get(':id')
   @UseGuards(JwtAuthGuard)
-  findById(@Param('id') id: string) {
-    return this.gardensService.findById(id);
+  findById(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
+    return this.gardensService.findById(request.user, id);
   }
 
   @Post()
