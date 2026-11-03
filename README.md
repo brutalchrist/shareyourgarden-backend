@@ -32,6 +32,27 @@
 $ yarn install
 ```
 
+## Environment variables
+
+Copy `.env.default` to `.env` and fill in the values.
+
+| Variable           | Required | Description                                                                 |
+| ------------------ | -------- | --------------------------------------------------------------------------- |
+| `MONGODB_URI`      | No       | MongoDB connection string. Defaults to `mongodb://localhost:27017/shareyourgarden`. |
+| `GOOGLE_CLIENT_ID` | Yes      | OAuth 2.0 Web client ID from Google Cloud Console, used to verify Google ID tokens. |
+| `JWT_SECRET`       | Yes      | Secret used to sign the backend access token (HS256). Generate with `openssl rand -base64 48`. |
+| `CORS_ORIGINS`     | No       | Comma-separated list of allowed web origins. Defaults to `http://localhost:3000`. |
+| `PORT`             | No       | HTTP port. Defaults to `1337`.                                              |
+
+The app does not start if `GOOGLE_CLIENT_ID` or `JWT_SECRET` is missing.
+
+## Authentication
+
+- `POST /auth/google` with `{ "credential": "<Google ID token>" }` returns `{ accessToken, user }`.
+- `GET /auth/me` with `Authorization: Bearer <accessToken>` returns the current user.
+
+Access tokens are HS256 JWTs that expire after 7 days. `GET /gardens` stays public.
+
 ## Compile and run the project
 
 ```bash
