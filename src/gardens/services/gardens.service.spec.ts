@@ -1,6 +1,12 @@
-import { BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
 import { Test, TestingModule } from '@nestjs/testing';
+import { UsersService } from '../../users/services/users.service';
 import {
   gardenDtoMock,
   gardenEntityMock,
@@ -8,14 +14,54 @@ import {
 import { Garden } from '../entities/garden.entity';
 import { GardensService } from './gardens.service';
 
+const owner = {
+  id: gardenEntityMock.ownerId,
+  email: 'juan.perez@example.com',
+  name: 'Juan Pérez',
+};
+const ownerPayload = { sub: owner.id, email: owner.email };
+const strangerPayload = {
+  sub: '64b7f0c2a1b2c3d4e5f60799',
+  email: 'stranger@example.com',
+};
+
+const polygon =
+  '[[-71.68216466903688,-35.42395867605907],[-71.65750980377199,-35.42395867605907],[-71.65750980377199,-35.43847037153734],[-71.68216466903688,-35.43847037153734],[-71.68216466903688,-35.42395867605907]]';
+
+const newGarden = {
+  name: 'Jardin 1',
+  products: [{ name: 'Lechuga', type: 'Verdura', quantity: 10 }],
+  location: { type: 'Point' as const, coordinates: [-71.66, -35.43] },
+};
+
+const gardenDocument = () => ({
+  ...gardenEntityMock,
+  set: jest.fn(),
+  save: jest.fn().mockResolvedValue(undefined),
+  deleteOne: jest.fn().mockResolvedValue(undefined),
+});
+
+const sortedQuery = {
+  sort: jest.fn().mockReturnThis(),
+  exec: jest.fn().mockResolvedValue([gardenEntityMock]),
+};
+
 const gardenModelMock = {
-  find: jest.fn().mockResolvedValue([gardenEntityMock]),
+  find: jest.fn(),
+  findById: jest.fn(),
+  create: jest.fn(),
+};
+
+const usersServiceMock = {
+  findById: jest.fn(),
 };
 
 describe('GardensService', () => {
   let service: GardensService;
 
   beforeEach(async () => {
+    jest.clearAllMocks();
+
     const module: TestingModule = await Test.createTestingModule({
       imports: [],
       providers: [
@@ -24,6 +70,7 @@ describe('GardensService', () => {
           provide: getModelToken(Garden.name),
           useValue: gardenModelMock,
         },
+        { provide: UsersService, useValue: usersServiceMock },
       ],
       controllers: [],
     }).compile();
@@ -36,11 +83,12 @@ describe('GardensService', () => {
   });
 
   describe('findGardens', () => {
+    beforeEach(() => {
+      gardenModelMock.find.mockResolvedValue([gardenEntityMock]);
+    });
+
     it('returns an array of gardens', async () => {
-      const result = await service.findGardens(
-        '[[-71.68216466903688,-35.42395867605907],[-71.65750980377199,-35.42395867605907],[-71.65750980377199,-35.43847037153734],[-71.68216466903688,-35.43847037153734],[-71.68216466903688,-35.42395867605907]]',
-        'test',
-      );
+      const result = await service.findGardens(polygon, 'test');
 
       expect(result).toEqual([gardenDtoMock]);
     });
@@ -65,6 +113,7 @@ describe('GardensService', () => {
           $and: [
             unknown,
             { $or: { location: { $geoWithin: { $box: unknown } } }[] },
+            unknown,
           ];
         },
       ];
@@ -92,10 +141,10 @@ describe('GardensService', () => {
       );
 
       const [filter] = gardenModelMock.find.mock.lastCall as [
-        { $and: [{ $or: unknown[] }, unknown] },
+        { $and: [{ $or: unknown[] }, unknown, unknown] },
       ];
       expect(filter.$and[0].$or).toContainEqual({
-        name: { $regex: '.*tomato.*', $options: 'i' },
+        name: { $regex: 'tomato', $options: 'i' },
       });
     });
 
@@ -164,6 +213,36 @@ describe('GardensService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    it('excludes inactive gardens', async () => {
+      await service.findGardens(polygon, 'test');
+
+      const [filter] = gardenModelMock.find.mock.lastCall as [
+        { $and: unknown[] },
+      ];
+      expect(filter.$and).toContainEqual({ active: { $ne: false } });
+    });
+
+    it('escapes the search term before using it as a regex', async () => {
+      await service.findGardens(polygon, 'a.b(c');
+
+      const [filter] = gardenModelMock.find.mock.lastCall as [
+        { $and: [{ $or: unknown[] }, unknown, unknown] },
+      ];
+      expect(filter.$and[0].$or).toContainEqual({
+        name: { $regex: 'a\\.b\\(c', $options: 'i' },
+      });
+    });
+
+    it('fills defaults for legacy gardens', async () => {
+      gardenModelMock.find.mockResolvedValue([
+        { ...gardenEntityMock, ownerId: undefined, active: undefined },
+      ]);
+
+      const [result] = await service.findGardens(polygon, 'test');
+
+      expect(result).toMatchObject({ active: true, ownerId: null });
+    });
+
     it('raises an error if the polygon is invalid', async () => {
       const result = service.findGardens('invalid', 'test');
       await expect(result).rejects.toThrow(BadRequestException);
@@ -181,6 +260,156 @@ describe('GardensService', () => {
     it('raises an error if the polygon has less than 4 points', async () => {
       await expect(service.findGardens('[[]]', 'test')).rejects.toThrow(
         'polygon: a minimum of 4 points was expected',
+      );
+    });
+  });
+
+  describe('findMine', () => {
+    it('returns the gardens of the token subject, most recent first', async () => {
+      gardenModelMock.find.mockReturnValue(sortedQuery);
+
+      const result = await service.findMine(ownerPayload);
+
+      expect(gardenModelMock.find).toHaveBeenCalledWith({ ownerId: owner.id });
+      expect(sortedQuery.sort).toHaveBeenCalledWith({ updatedAt: -1 });
+      expect(result).toEqual([gardenDtoMock]);
+    });
+
+    it('returns an empty list for a malformed subject', async () => {
+      await expect(
+        service.findMine({ sub: 'not-an-id', email: owner.email }),
+      ).resolves.toEqual([]);
+      expect(gardenModelMock.find).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findById', () => {
+    it('returns the garden', async () => {
+      gardenModelMock.findById.mockResolvedValue(gardenEntityMock);
+
+      await expect(service.findById(gardenEntityMock._id)).resolves.toEqual(
+        gardenDtoMock,
+      );
+    });
+
+    it('raises NotFound when the garden does not exist', async () => {
+      gardenModelMock.findById.mockResolvedValue(null);
+
+      await expect(service.findById(gardenEntityMock._id)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('raises NotFound for an invalid id', async () => {
+      await expect(service.findById('nope')).rejects.toThrow(NotFoundException);
+      expect(gardenModelMock.findById).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('create', () => {
+    it('associates the garden with the authenticated user', async () => {
+      usersServiceMock.findById.mockResolvedValue(owner);
+      gardenModelMock.create.mockResolvedValue(gardenEntityMock);
+
+      const result = await service.create(ownerPayload, {
+        ...newGarden,
+        description: undefined,
+      });
+
+      expect(usersServiceMock.findById).toHaveBeenCalledWith(owner.id);
+      expect(gardenModelMock.create).toHaveBeenCalledWith({
+        ...newGarden,
+        ownerId: owner.id,
+        owner: { name: owner.name, email: owner.email },
+      });
+      expect(result).toEqual(gardenDtoMock);
+    });
+
+    it('falls back to the email when the user has no name', async () => {
+      usersServiceMock.findById.mockResolvedValue({
+        ...owner,
+        name: undefined,
+      });
+      gardenModelMock.create.mockResolvedValue(gardenEntityMock);
+
+      await service.create(ownerPayload, newGarden);
+
+      expect(gardenModelMock.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          owner: { name: owner.email, email: owner.email },
+        }),
+      );
+    });
+
+    it('rejects when the user no longer exists', async () => {
+      usersServiceMock.findById.mockResolvedValue(null);
+
+      await expect(service.create(ownerPayload, newGarden)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(gardenModelMock.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('update', () => {
+    it('applies only the provided fields for the owner', async () => {
+      const garden = gardenDocument();
+      gardenModelMock.findById.mockResolvedValue(garden);
+
+      await service.update(ownerPayload, garden._id, {
+        name: 'Nuevo nombre',
+        description: undefined,
+      });
+
+      expect(garden.set).toHaveBeenCalledWith({ name: 'Nuevo nombre' });
+      expect(garden.save).toHaveBeenCalled();
+    });
+
+    it('raises Forbidden for another user', async () => {
+      const garden = gardenDocument();
+      gardenModelMock.findById.mockResolvedValue(garden);
+
+      await expect(
+        service.update(strangerPayload, garden._id, { name: 'x' }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(garden.save).not.toHaveBeenCalled();
+    });
+
+    it('raises NotFound when the garden does not exist', async () => {
+      gardenModelMock.findById.mockResolvedValue(null);
+
+      await expect(
+        service.update(ownerPayload, gardenEntityMock._id, { name: 'x' }),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('remove', () => {
+    it('deletes the garden for the owner', async () => {
+      const garden = gardenDocument();
+      gardenModelMock.findById.mockResolvedValue(garden);
+
+      await service.remove(ownerPayload, garden._id);
+
+      expect(garden.deleteOne).toHaveBeenCalled();
+    });
+
+    it('raises Forbidden for another user', async () => {
+      const garden = gardenDocument();
+      gardenModelMock.findById.mockResolvedValue(garden);
+
+      await expect(service.remove(strangerPayload, garden._id)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(garden.deleteOne).not.toHaveBeenCalled();
+    });
+
+    it('raises Forbidden for a legacy garden without owner', async () => {
+      const garden = { ...gardenDocument(), ownerId: undefined };
+      gardenModelMock.findById.mockResolvedValue(garden);
+
+      await expect(service.remove(ownerPayload, garden._id)).rejects.toThrow(
+        ForbiddenException,
       );
     });
   });

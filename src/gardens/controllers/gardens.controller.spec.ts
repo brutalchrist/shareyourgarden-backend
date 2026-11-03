@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { gardenDtoMock } from '../entities/__fixtures__/gardens-mock';
 import { GardensService } from '../services/gardens.service';
 import { GardensController } from './gardens.controller';
@@ -19,7 +20,10 @@ describe('GardensController', () => {
           useValue: mockGardensService,
         },
       ],
-    }).compile();
+    })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     controller = module.get<GardensController>(GardensController);
   });

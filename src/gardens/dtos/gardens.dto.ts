@@ -1,15 +1,72 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
-  IsEmail,
+  IsBoolean,
+  IsIn,
   IsNotEmpty,
   IsNumber,
+  IsObject,
   IsString,
+  Length,
+  MaxLength,
+  Min,
+  ValidateBy,
+  ValidateIf,
+  ValidateNested,
 } from 'class-validator';
 
-class ProductDto {
+// Like @IsOptional, but only for omitted fields: an explicit null still fails validation.
+const IsOmittable = () => ValidateIf((_, value) => value !== undefined);
+
+const IsLngLat = () =>
+  ValidateBy({
+    name: 'isLngLat',
+    validator: {
+      validate: (value: unknown) =>
+        Array.isArray(value) &&
+        value.length === 2 &&
+        value.every((n) => typeof n === 'number' && Number.isFinite(n)) &&
+        Math.abs(value[0] as number) <= 180 &&
+        Math.abs(value[1] as number) <= 90,
+      defaultMessage: () =>
+        '$property must be [lng, lat] with lng in [-180, 180] and lat in [-90, 90]',
+    },
+  });
+
+export class ProductDto {
+  name: string;
+  type: string;
+  quantity: number;
+  unit?: string;
+}
+
+export class PersonDto {
+  name: string;
+  email: string;
+}
+
+export class LocationDto {
+  type: 'Point';
+  coordinates: number[];
+}
+
+export class GardenDto {
+  id: string;
+  name: string;
+  description?: string;
+  active: boolean;
+  products: ProductDto[];
+  owner: PersonDto;
+  ownerId: string | null;
+  location: LocationDto;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+export class ProductInputDto {
   @IsString()
-  @IsNotEmpty()
+  @Length(1, 60)
   name: string;
 
   @IsString()
@@ -17,48 +74,73 @@ class ProductDto {
   type: string;
 
   @IsNumber()
-  @IsNotEmpty()
+  @Min(0)
   quantity: number;
+
+  @IsOmittable()
+  @IsString()
+  unit?: string;
 }
 
-class PersonDto {
-  @IsString()
-  @IsNotEmpty()
-  name: string;
+export class LocationInputDto {
+  @IsIn(['Point'])
+  type: 'Point';
 
-  @IsEmail()
-  @IsNotEmpty()
-  email: string;
-}
-
-class LocationDto {
-  @IsString()
-  @IsNotEmpty()
-  type: string;
-
-  @IsArray()
-  @IsNotEmpty()
+  @IsLngLat()
   coordinates: number[];
 }
 
-export class GardensDto {
+export class CreateGardenDto {
   @IsString()
-  @IsNotEmpty()
-  id: string;
-
-  @IsString()
-  @IsNotEmpty()
+  @Length(1, 80)
   name: string;
 
+  @IsOmittable()
+  @IsString()
+  @MaxLength(500)
+  description?: string;
+
+  @IsOmittable()
+  @IsBoolean()
+  active?: boolean;
+
   @IsArray()
-  @IsNotEmpty()
-  products: ProductDto[];
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => ProductInputDto)
+  products: ProductInputDto[];
 
-  @IsNotEmpty()
-  @Type(() => PersonDto)
-  owner: PersonDto;
+  @IsObject()
+  @ValidateNested()
+  @Type(() => LocationInputDto)
+  location: LocationInputDto;
+}
 
-  @IsNotEmpty()
-  @Type(() => LocationDto)
-  location: LocationDto;
+export class UpdateGardenDto {
+  @IsOmittable()
+  @IsString()
+  @Length(1, 80)
+  name?: string;
+
+  @IsOmittable()
+  @IsString()
+  @MaxLength(500)
+  description?: string;
+
+  @IsOmittable()
+  @IsBoolean()
+  active?: boolean;
+
+  @IsOmittable()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => ProductInputDto)
+  products?: ProductInputDto[];
+
+  @IsOmittable()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => LocationInputDto)
+  location?: LocationInputDto;
 }
