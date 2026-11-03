@@ -23,7 +23,7 @@ export class GardensService {
     try {
       coordinates = JSON.parse(polygon) as number[][];
     } catch (error) {
-      throw new Error(`Invalid polygon format: ${error}`);
+      throw new Error(`Invalid polygon format: ${error}`, { cause: error });
     }
 
     if (!Array.isArray(coordinates)) {
