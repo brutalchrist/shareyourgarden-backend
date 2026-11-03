@@ -3,10 +3,10 @@ import { ConfigModule } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { getModelToken } from '@nestjs/mongoose';
 import { Test, TestingModule } from '@nestjs/testing';
-import { Types } from 'mongoose';
+import { Mongoose, Types } from 'mongoose';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { Garden } from './../src/gardens/entities/garden.entity';
+import { Garden, GardenSchema } from './../src/gardens/entities/garden.entity';
 import { GardensModule } from './../src/gardens/gardens.module';
 import { User } from './../src/users/entities/user.entity';
 import { UsersService } from './../src/users/services/users.service';
@@ -29,6 +29,15 @@ const usersServiceMock = {
 };
 
 type Filter = Record<string, unknown>;
+
+// Unconnected model used only to cast filters and documents exactly as
+// Mongoose would, so type mismatches (e.g. string vs ObjectId) surface here.
+const castingModel = new Mongoose().model(Garden.name, GardenSchema);
+
+const isSameValue = (value: unknown, expected: unknown) =>
+  value instanceof Types.ObjectId && expected instanceof Types.ObjectId
+    ? value.equals(expected)
+    : value === expected;
 type Regex = { $regex: string; $options: string };
 
 const valuesAt = (doc: unknown, path: string): unknown[] =>
@@ -56,7 +65,7 @@ const matches = (doc: Record<string, unknown>, filter: Filter): boolean =>
     }
     const values = valuesAt(doc, key);
     if (condition && typeof condition === 'object' && '$ne' in condition) {
-      return values.every((value) => value !== condition.$ne);
+      return values.every((value) => !isSameValue(value, condition.$ne));
     }
     if (condition && typeof condition === 'object' && '$regex' in condition) {
       const { $regex, $options } = condition as Regex;
@@ -65,7 +74,7 @@ const matches = (doc: Record<string, unknown>, filter: Filter): boolean =>
         (value) => typeof value === 'string' && regex.test(value),
       );
     }
-    return values.some((value) => String(value) === String(condition));
+    return values.some((value) => isSameValue(value, condition));
   });
 
 // In-memory stand-in for the Garden Mongoose model.
@@ -96,16 +105,15 @@ class FakeGardenModel {
     return doc;
   }
 
-  insertLegacy(data: Record<string, unknown>) {
+  // Writes straight to the "collection", bypassing schema casting.
+  insertRaw(data: Record<string, unknown>) {
     this.docs.push(this.toDocument(data));
   }
 
   create(data: Record<string, unknown>) {
     const createdAt = this.tick();
     const doc = this.toDocument({
-      active: true,
-      ...(JSON.parse(JSON.stringify(data)) as Record<string, unknown>),
-      ownerId: new Types.ObjectId(String(data.ownerId)),
+      ...new castingModel(data).toObject(),
       createdAt,
       updatedAt: createdAt,
     });
@@ -120,7 +128,8 @@ class FakeGardenModel {
   }
 
   find(filter: Filter) {
-    let results = this.docs.filter((doc) => matches(doc, filter));
+    const casted = castingModel.find(filter).cast() as Filter;
+    let results = this.docs.filter((doc) => matches(doc, casted));
     const query = {
       sort: (spec: Record<string, 1 | -1>) => {
         const [[field, direction]] = Object.entries(spec);
@@ -338,6 +347,37 @@ describe('GardensController (e2e)', () => {
       expect(gardens.map((garden) => garden.id)).toEqual([first.id, second.id]);
     });
 
+    it('returns gardens whose ownerId was stored as an ObjectId', async () => {
+      const _id = new Types.ObjectId();
+      gardenModel.insertRaw({
+        _id,
+        ownerId: new Types.ObjectId(alice.id),
+        name: 'Stored directly',
+        products: [],
+        owner: { name: 'Alice', email: users.alice.email },
+        location: { type: 'Point', coordinates: [-71.66, -35.43] },
+      });
+
+      const mine = await request(server())
+        .get('/gardens/mine')
+        .set('Authorization', auth(alice))
+        .expect(200);
+      expect((mine.body as GardenResponse[]).map((g) => g.id)).toEqual([
+        String(_id),
+      ]);
+
+      await request(server())
+        .patch(`/gardens/${String(_id)}`)
+        .set('Authorization', auth(alice))
+        .send({ name: 'Renamed' })
+        .expect(200);
+      await request(server())
+        .delete(`/gardens/${String(_id)}`)
+        .set('Authorization', auth(alice))
+        .expect(204);
+      expect(gardenModel.docs).toHaveLength(0);
+    });
+
     it('returns 401 without a token', () => {
       return request(server()).get('/gardens/mine').expect(401);
     });
@@ -458,7 +498,7 @@ describe('GardensController (e2e)', () => {
         active: false,
       } as typeof gardenBody);
       // Legacy document written before ownerId/active existed.
-      gardenModel.insertLegacy({
+      gardenModel.insertRaw({
         name: 'Legacy',
         products: [],
         owner: { name: 'Old', email: 'old@example.com' },

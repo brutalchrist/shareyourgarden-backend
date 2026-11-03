@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Schema as MongooseSchema, Types } from 'mongoose';
 import { User } from '../../users/entities/user.entity';
 
 @Schema({ _id: false })
@@ -44,7 +44,12 @@ const LocationSchema = SchemaFactory.createForClass(Location);
 @Schema({ timestamps: true })
 export class Garden extends Document {
   // Legacy gardens may lack an owner id; every garden created through the API sets it.
-  @Prop({ type: Types.ObjectId, ref: User.name, index: true, required: true })
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: User.name,
+    index: true,
+    required: true,
+  })
   ownerId?: Types.ObjectId;
 
   @Prop({ required: true })
