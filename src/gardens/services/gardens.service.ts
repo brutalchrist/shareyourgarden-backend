@@ -89,7 +89,6 @@ export class GardensService {
           $or: [
             { name: { $regex, $options } },
             { 'products.name': { $regex, $options } },
-            { 'products.type': { $regex, $options } },
             { 'owner.name': { $regex, $options } },
           ],
         },

@@ -1,20 +1,26 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Schema as MongooseSchema, Types } from 'mongoose';
 import { User } from '../../users/entities/user.entity';
+import {
+  PRODUCT_TYPES,
+  PRODUCT_UNITS,
+  type ProductType,
+  type ProductUnit,
+} from '../gardens.constants';
 
 @Schema({ _id: false })
 export class Product {
   @Prop({ required: true })
   name: string;
 
-  @Prop({ required: true })
-  type: string;
+  @Prop({ type: String, required: true, enum: PRODUCT_TYPES })
+  type: ProductType;
 
   @Prop({ required: true, min: 0 })
   quantity: number;
 
-  @Prop()
-  unit?: string;
+  @Prop({ type: String, enum: PRODUCT_UNITS })
+  unit?: ProductUnit;
 }
 
 const ProductSchema = SchemaFactory.createForClass(Product);

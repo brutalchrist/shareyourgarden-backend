@@ -4,7 +4,6 @@ import {
   IsArray,
   IsBoolean,
   IsIn,
-  IsNotEmpty,
   IsNumber,
   IsObject,
   IsString,
@@ -15,6 +14,12 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
+import {
+  PRODUCT_TYPES,
+  PRODUCT_UNITS,
+  type ProductType,
+  type ProductUnit,
+} from '../gardens.constants';
 
 // Like @IsOptional, but only for omitted fields: an explicit null still fails validation.
 const IsOmittable = () => ValidateIf((_, value) => value !== undefined);
@@ -36,9 +41,9 @@ const IsLngLat = () =>
 
 export class ProductDto {
   name: string;
-  type: string;
+  type: ProductType;
   quantity: number;
-  unit?: string;
+  unit?: ProductUnit;
 }
 
 export class PersonDto {
@@ -69,17 +74,16 @@ export class ProductInputDto {
   @Length(1, 60)
   name: string;
 
-  @IsString()
-  @IsNotEmpty()
-  type: string;
+  @IsIn(PRODUCT_TYPES)
+  type: ProductType;
 
   @IsNumber()
   @Min(0)
   quantity: number;
 
   @IsOmittable()
-  @IsString()
-  unit?: string;
+  @IsIn(PRODUCT_UNITS)
+  unit?: ProductUnit;
 }
 
 export class LocationInputDto {

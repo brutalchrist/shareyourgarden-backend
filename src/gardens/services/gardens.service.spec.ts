@@ -30,7 +30,7 @@ const polygon =
 
 const newGarden = {
   name: 'Jardin 1',
-  products: [{ name: 'Lechuga', type: 'Verdura', quantity: 10 }],
+  products: [{ name: 'Lechuga', type: 'vegetable' as const, quantity: 10 }],
   location: { type: 'Point' as const, coordinates: [-71.66, -35.43] },
 };
 
@@ -211,6 +211,17 @@ describe('GardensService', () => {
       await expect(
         service.findGardens('[[0,0],[1,0],["a",1],[0,0]]', 'test'),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('does not search by product type codes', async () => {
+      await service.findGardens(polygon, 'vegetable');
+
+      const [filter] = gardenModelMock.find.mock.lastCall as [
+        { $and: [{ $or: Record<string, unknown>[] }, unknown, unknown] },
+      ];
+      expect(
+        filter.$and[0].$or.map((clause) => Object.keys(clause)[0]),
+      ).toEqual(['name', 'products.name', 'owner.name']);
     });
 
     it('excludes inactive gardens', async () => {

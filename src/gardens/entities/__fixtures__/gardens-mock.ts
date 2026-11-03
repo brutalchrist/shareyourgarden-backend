@@ -5,15 +5,15 @@ const gardenMock = {
   products: [
     {
       name: 'Manzana roja',
-      type: 'Fruta',
+      type: 'fruit',
       quantity: 5,
       unit: 'kg',
     },
     {
       name: 'Lechuga',
-      type: 'Verdura',
+      type: 'vegetable',
       quantity: 10,
-      unit: 'unidades',
+      unit: 'unit',
     },
   ],
   owner: {

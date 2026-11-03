@@ -157,8 +157,8 @@ const gardenBody = {
   name: 'Huerto Talca',
   description: 'Tomates y lechugas',
   products: [
-    { name: 'Tomate', type: 'Verdura', quantity: 3, unit: 'kg' },
-    { name: 'Menta', type: 'Hierba', quantity: 0 },
+    { name: 'Tomate', type: 'vegetable', quantity: 3, unit: 'kg' },
+    { name: 'Menta', type: 'herb', quantity: 0 },
   ],
   location: { type: 'Point', coordinates: [-71.66, -35.43] },
 };
@@ -250,8 +250,8 @@ describe('GardensController (e2e)', () => {
         owner: { name: 'Alice', email: 'alice@example.com' },
         location: gardenBody.location,
         products: [
-          { name: 'Tomate', type: 'Verdura', quantity: 3, unit: 'kg' },
-          { name: 'Menta', type: 'Hierba', quantity: 0 },
+          { name: 'Tomate', type: 'vegetable', quantity: 3, unit: 'kg' },
+          { name: 'Menta', type: 'herb', quantity: 0 },
         ],
       });
       expect(garden.id).toEqual(expect.any(String));
@@ -284,7 +284,21 @@ describe('GardensController (e2e)', () => {
         'negative quantity',
         {
           ...gardenBody,
-          products: [{ name: 'A', type: 'Fruta', quantity: -1 }],
+          products: [{ name: 'A', type: 'fruit', quantity: -1 }],
+        },
+      ],
+      [
+        'unknown product type',
+        {
+          ...gardenBody,
+          products: [{ name: 'A', type: 'Verdura', quantity: 1 }],
+        },
+      ],
+      [
+        'unknown product unit',
+        {
+          ...gardenBody,
+          products: [{ name: 'A', type: 'fruit', quantity: 1, unit: 'kilos' }],
         },
       ],
       [
@@ -295,7 +309,7 @@ describe('GardensController (e2e)', () => {
         'string quantity',
         {
           ...gardenBody,
-          products: [{ name: 'A', type: 'Fruta', quantity: '1' }],
+          products: [{ name: 'A', type: 'fruit', quantity: '1' }],
         },
       ],
       [
