@@ -7,6 +7,7 @@ import { OAuth2Client } from 'google-auth-library';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AuthModule } from './../src/auth/auth.module';
+import { HttpExceptionFilter } from './../src/common/filters/http-exception.filter';
 import { User } from './../src/users/entities/user.entity';
 import { UsersService } from './../src/users/services/users.service';
 
@@ -17,6 +18,7 @@ const user = {
   email: 'jane@example.com',
   name: 'Jane Doe',
   picture: 'https://example.com/jane.png',
+  locale: null,
 };
 
 const googleClientMock = {
@@ -54,6 +56,7 @@ describe('AuthController (e2e)', () => {
       .compile();
 
     app = moduleFixture.createNestApplication();
+    app.useGlobalFilters(new HttpExceptionFilter());
     await app.init();
     jwtService = moduleFixture.get(JwtService);
   });
@@ -92,20 +95,33 @@ describe('AuthController (e2e)', () => {
       });
     });
 
-    it('returns 400 when the credential is missing', () => {
-      return request(app.getHttpServer())
+    it('returns 400 when the credential is missing', async () => {
+      const response = await request(app.getHttpServer())
         .post('/auth/google')
         .send({})
         .expect(400);
+
+      expect(response.body).toMatchObject({
+        statusCode: 400,
+        error: 'Bad Request',
+        code: 'VALIDATION_FAILED',
+      });
     });
 
-    it('returns 401 when the credential is invalid', () => {
+    it('returns 401 when the credential is invalid', async () => {
       googleClientMock.verifyIdToken.mockRejectedValue(new Error('invalid'));
 
-      return request(app.getHttpServer())
+      const response = await request(app.getHttpServer())
         .post('/auth/google')
         .send({ credential: 'bad-token' })
         .expect(401);
+
+      expect(response.body).toEqual({
+        statusCode: 401,
+        message: 'Invalid Google credential',
+        error: 'Unauthorized',
+        code: 'INVALID_GOOGLE_CREDENTIAL',
+      });
     });
   });
 
@@ -120,8 +136,13 @@ describe('AuthController (e2e)', () => {
         .expect(user);
     });
 
-    it('returns 401 without a token', () => {
-      return request(app.getHttpServer()).get('/auth/me').expect(401);
+    it('returns 401 with an UNAUTHORIZED code without a token', () => {
+      return request(app.getHttpServer()).get('/auth/me').expect(401, {
+        statusCode: 401,
+        message: 'Unauthorized',
+        error: 'Unauthorized',
+        code: 'UNAUTHORIZED',
+      });
     });
 
     it('returns 401 with a token signed by another secret', () => {

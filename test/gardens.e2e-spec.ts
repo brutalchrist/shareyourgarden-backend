@@ -6,6 +6,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { Mongoose, Types } from 'mongoose';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import { HttpExceptionFilter } from './../src/common/filters/http-exception.filter';
 import { Garden, GardenSchema } from './../src/gardens/entities/garden.entity';
 import { GardensModule } from './../src/gardens/gardens.module';
 import { User } from './../src/users/entities/user.entity';
@@ -214,6 +215,7 @@ describe('GardensController (e2e)', () => {
       .compile();
 
     app = moduleFixture.createNestApplication();
+    app.useGlobalFilters(new HttpExceptionFilter());
     await app.init();
 
     gardenModel = moduleFixture.get(getModelToken(Garden.name));
@@ -413,7 +415,12 @@ describe('GardensController (e2e)', () => {
       await request(server())
         .get('/gardens/64b7f0c2a1b2c3d4e5f60718')
         .set('Authorization', auth(alice))
-        .expect(404);
+        .expect(404, {
+          statusCode: 404,
+          message: 'Garden not found',
+          error: 'Not Found',
+          code: 'GARDEN_NOT_FOUND',
+        });
       await request(server())
         .get('/gardens/not-an-id')
         .set('Authorization', auth(alice))
