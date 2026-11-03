@@ -28,6 +28,7 @@ const usersServiceMock = {
       Object.values(users).find((user) => user.id === id) ?? null,
     ),
   ),
+  picturesByIds: jest.fn(() => Promise.resolve(new Map<string, string>())),
 };
 
 type Filter = Record<string, unknown>;
