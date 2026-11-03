@@ -15,6 +15,7 @@ import {
   GardenDto,
   UpdateGardenDto,
 } from '../dtos/gardens.dto';
+import { Conversation } from '../../conversations/entities/conversation.entity';
 import { Garden } from '../entities/garden.entity';
 
 type Box = [[number, number], [number, number]];
@@ -26,6 +27,8 @@ const escapeRegex = (value: string) =>
 export class GardensService {
   constructor(
     @InjectModel(Garden.name) private gardenModel: Model<Garden>,
+    @InjectModel(Conversation.name)
+    private conversationModel: Model<Conversation>,
     private readonly usersService: UsersService,
   ) {}
 
@@ -177,6 +180,11 @@ export class GardensService {
     const garden = await this.findOwnedGardenOrFail(user, id);
 
     await garden.deleteOne();
+    // Conversations about it stay readable but nobody can write anymore.
+    await this.conversationModel.updateMany(
+      { gardenId: garden._id },
+      { $set: { gardenDeleted: true } },
+    );
   }
 
   private async findGardenOrFail(id: string): Promise<Garden> {

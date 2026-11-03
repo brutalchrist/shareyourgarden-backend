@@ -21,6 +21,8 @@ const Trim = () =>
     typeof value === 'string' ? value.trim() : value,
   );
 
+export type ConversationReadOnlyReason = 'blocked' | 'garden-deleted';
+
 export const CONVERSATION_FILTERS = ['all', 'received', 'sent'] as const;
 export type ConversationFilter = (typeof CONVERSATION_FILTERS)[number];
 
@@ -49,6 +51,10 @@ export class ConversationDto {
   unreadCount: number;
   // When the other side last read the thread, to show "Seen".
   otherLastReadAt: Date | null;
+  // Why nobody can write here anymore, if so. "blocked" does not say who
+  // blocked whom; `blockedByMe` tells the blocker so they can undo it.
+  readOnly: ConversationReadOnlyReason | null;
+  blockedByMe: boolean;
   createdAt: Date;
   updatedAt: Date;
 }

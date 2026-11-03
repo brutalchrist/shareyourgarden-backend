@@ -15,6 +15,12 @@ export const ErrorCode = {
   CONVERSATION_NOT_FOUND: 'CONVERSATION_NOT_FOUND',
   // A message id used as a pagination cursor is not in the conversation.
   INVALID_MESSAGE_CURSOR: 'INVALID_MESSAGE_CURSOR',
+  // One of the two people blocked the other.
+  USER_BLOCKED: 'USER_BLOCKED',
+  // The garden was deleted, so the conversation is read-only.
+  CONVERSATION_CLOSED: 'CONVERSATION_CLOSED',
+  TOO_MANY_CONVERSATIONS: 'TOO_MANY_CONVERSATIONS',
+  TOO_MANY_MESSAGES: 'TOO_MANY_MESSAGES',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

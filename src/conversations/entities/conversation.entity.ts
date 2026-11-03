@@ -82,6 +82,10 @@ export class Conversation extends Document {
   @Prop()
   requesterLastReadAt?: Date;
 
+  // Set when the garden is deleted: the conversation stays, read-only.
+  @Prop({ default: false })
+  gardenDeleted: boolean;
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -90,3 +94,5 @@ export const ConversationSchema = SchemaFactory.createForClass(Conversation);
 ConversationSchema.index({ gardenId: 1, requesterId: 1 }, { unique: true });
 ConversationSchema.index({ ownerId: 1, 'lastMessage.createdAt': -1 });
 ConversationSchema.index({ requesterId: 1, 'lastMessage.createdAt': -1 });
+// Counting a requester's new conversations for the rate limit.
+ConversationSchema.index({ requesterId: 1, createdAt: -1 });

@@ -11,6 +11,7 @@ import {
   gardenDtoMock,
   gardenEntityMock,
 } from '../entities/__fixtures__/gardens-mock';
+import { Conversation } from '../../conversations/entities/conversation.entity';
 import { Garden } from '../entities/garden.entity';
 import { GardensService } from './gardens.service';
 
@@ -57,6 +58,10 @@ const gardenModelMock = {
   create: jest.fn(),
 };
 
+const conversationModelMock = {
+  updateMany: jest.fn().mockResolvedValue({ modifiedCount: 0 }),
+};
+
 const usersServiceMock = {
   findById: jest.fn(),
 };
@@ -76,6 +81,10 @@ describe('GardensService', () => {
           useValue: gardenModelMock,
         },
         { provide: UsersService, useValue: usersServiceMock },
+        {
+          provide: getModelToken(Conversation.name),
+          useValue: conversationModelMock,
+        },
       ],
       controllers: [],
     }).compile();
@@ -426,6 +435,18 @@ describe('GardensService', () => {
       expect(garden.deleteOne).toHaveBeenCalled();
     });
 
+    it('leaves its conversations read-only', async () => {
+      const garden = gardenDocument();
+      gardenModelMock.findById.mockResolvedValue(garden);
+
+      await service.remove(ownerPayload, garden._id);
+
+      expect(conversationModelMock.updateMany).toHaveBeenCalledWith(
+        { gardenId: garden._id },
+        { $set: { gardenDeleted: true } },
+      );
+    });
+
     it('raises Forbidden for another user', async () => {
       const garden = gardenDocument();
       gardenModelMock.findById.mockResolvedValue(garden);
@@ -434,6 +455,7 @@ describe('GardensService', () => {
         ForbiddenException,
       );
       expect(garden.deleteOne).not.toHaveBeenCalled();
+      expect(conversationModelMock.updateMany).not.toHaveBeenCalled();
     });
 
     it('raises Forbidden for a legacy garden without owner', async () => {

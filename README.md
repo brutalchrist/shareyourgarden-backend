@@ -88,8 +88,22 @@ gardens of the same owner get separate conversations.
 | `GET` | `/conversations/:id/messages` | `{ messages, hasMore }`, oldest first. Without cursor, the latest page. `before=<messageId>` loads older history and `after=<messageId>` polls for new messages. `limit` 1-100, default 30. |
 | `POST` | `/conversations/:id/messages` | `{ body }`. Returns the message. |
 | `POST` | `/conversations/:id/read` | Marks the conversation as read (`204`). |
+| `POST` | `/conversations/:id/block` | Blocks the other person (`204`). |
+| `DELETE` | `/conversations/:id/block` | Unblocks the other person (`204`). Only lifts a block you made. |
 
 Message bodies are trimmed and must be 1-2000 characters; `productName`, 1-60.
+
+### Blocking, limits and deleted gardens
+
+- **Blocking is between people, not conversations.** While either person has
+  blocked the other, neither can send messages in any of their conversations
+  or start new ones (`403 USER_BLOCKED`). History stays readable.
+- **Rate limits** (in `src/conversations/conversations.constants.ts`):
+  - at most 10 new conversations per hour per user (`429 TOO_MANY_CONVERSATIONS`);
+  - at most 20 messages per minute per user (`429 TOO_MANY_MESSAGES`).
+  Writing again about a garden you already contacted only counts as a message.
+- **Deleting a garden keeps its conversations** but makes them read-only
+  (`409 CONVERSATION_CLOSED`).
 
 A conversation is returned from the authenticated user's side:
 
@@ -104,6 +118,8 @@ A conversation is returned from the authenticated user's side:
   "lastMessage": { "body": "Hola", "senderId": "...", "createdAt": "..." },
   "unreadCount": 0,
   "otherLastReadAt": null,
+  "readOnly": null,
+  "blockedByMe": false,
   "createdAt": "...",
   "updatedAt": "..."
 }
@@ -111,7 +127,9 @@ A conversation is returned from the authenticated user's side:
 
 `role` is `owner` when the user owns the garden and `requester` otherwise.
 `otherLastReadAt` is when the other side last read the conversation, to show
-"Seen". Garden and participant names are stored when the conversation starts.
+"Seen". `readOnly` is `null`, `"blocked"` or `"garden-deleted"`; it does not
+say who blocked whom, but `blockedByMe` is `true` for the person who did, so
+they can unblock. Garden and participant names are stored when the conversation starts.
 
 A message is `{ id, conversationId, senderId, body, createdAt }`.
 
@@ -144,6 +162,10 @@ a stable `code` that clients can translate instead of showing `message`:
 | `INVALID_MESSAGE_CURSOR`    | 400    | `before`/`after` is not a message of that conversation. |
 | `CONVERSATION_NOT_FOUND`    | 404    | No conversation with that id that you take part in. |
 | `GARDEN_HAS_NO_OWNER`       | 409    | Writing to a legacy garden without owner.         |
+| `USER_BLOCKED`              | 403    | One of the two people blocked the other.          |
+| `CONVERSATION_CLOSED`       | 409    | Writing in a conversation about a deleted garden. |
+| `TOO_MANY_CONVERSATIONS`    | 429    | More than 10 new conversations in an hour.        |
+| `TOO_MANY_MESSAGES`         | 429    | More than 20 messages in a minute.                |
 | `INTERNAL_ERROR`            | 5xx    | Unexpected server error.                          |
 
 Throw sites name a code by passing `{ message, code }` to the Nest exception

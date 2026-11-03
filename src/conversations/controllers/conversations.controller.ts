@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
@@ -76,5 +77,18 @@ export class ConversationsController {
   @HttpCode(204)
   markRead(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
     return this.conversationsService.markRead(request.user, id);
+  }
+
+  // Blocks the other person in this conversation (in all of them).
+  @Post(':id/block')
+  @HttpCode(204)
+  block(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
+    return this.conversationsService.block(request.user, id);
+  }
+
+  @Delete(':id/block')
+  @HttpCode(204)
+  unblock(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
+    return this.conversationsService.unblock(request.user, id);
   }
 }
