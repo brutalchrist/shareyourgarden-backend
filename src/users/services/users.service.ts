@@ -46,6 +46,25 @@ export class UsersService {
     return user ? this.mapEntityToDto(user) : null;
   }
 
+  /** Profile pictures of the given users, by id, in one query. */
+  async picturesByIds(ids: string[]): Promise<Map<string, string>> {
+    const validIds = ids.filter((id) => isValidObjectId(id));
+
+    if (validIds.length === 0) {
+      return new Map();
+    }
+
+    const users = await this.userModel
+      .find({ _id: { $in: validIds } }, { picture: 1 })
+      .exec();
+
+    return new Map(
+      users
+        .filter((user) => user.picture)
+        .map((user) => [String(user._id), user.picture]),
+    );
+  }
+
   async block(userId: Types.ObjectId, otherId: Types.ObjectId): Promise<void> {
     await this.userModel.updateOne(
       { _id: userId },
