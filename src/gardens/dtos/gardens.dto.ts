@@ -48,7 +48,8 @@ export class ProductDto {
 
 export class PersonDto {
   name: string;
-  email: string;
+  // Only sent to the garden's owner.
+  email?: string;
 }
 
 export class LocationDto {

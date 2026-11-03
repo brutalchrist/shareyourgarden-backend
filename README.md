@@ -65,6 +65,56 @@ browser/system language, the default). The allowed values live in
   in the same shape as `GET /auth/me`. Omitted fields are left as they are;
   any other value or unknown field returns `400`.
 
+## Gardens
+
+`GET /gardens` is public and never includes the owner's email: `owner` is just
+`{ name }`. The email is only returned to the garden's owner (`GET
+/gardens/mine`, `GET /gardens/:id`, `POST` and `PATCH`). Visitors contact owners
+through conversations.
+
+## Conversations
+
+Messaging between a garden's owner and someone interested in it. Every route
+requires `Authorization: Bearer <accessToken>`. There is one conversation per
+garden and requester: writing to the same garden again reuses it, and two
+gardens of the same owner get separate conversations.
+
+| Method | Route | Description |
+| ------ | ----- | ----------- |
+| `POST` | `/conversations` | `{ gardenId, body, productName? }`. Starts the conversation, or reuses it, and sends `body`. Returns the conversation. |
+| `GET` | `/conversations` | Inbox, latest message first. Query: `role` (`all`, `received` = about my gardens, `sent`), `gardenId`, `limit` (1-50, default 20) and `before` (the `lastMessage.createdAt` of the last item, for the next page). Returns `{ conversations, hasMore }`. |
+| `GET` | `/conversations/summary` | `{ unread, byGarden }`: conversations with unread messages, in total and per garden the user owns. Cheap enough to poll. |
+| `GET` | `/conversations/:id` | One conversation. |
+| `GET` | `/conversations/:id/messages` | `{ messages, hasMore }`, oldest first. Without cursor, the latest page. `before=<messageId>` loads older history and `after=<messageId>` polls for new messages. `limit` 1-100, default 30. |
+| `POST` | `/conversations/:id/messages` | `{ body }`. Returns the message. |
+| `POST` | `/conversations/:id/read` | Marks the conversation as read (`204`). |
+
+Message bodies are trimmed and must be 1-2000 characters; `productName`, 1-60.
+
+A conversation is returned from the authenticated user's side:
+
+```json
+{
+  "id": "...",
+  "gardenId": "...",
+  "gardenName": "Huerta Norte",
+  "productName": "Tomate",
+  "role": "requester",
+  "otherUser": { "id": "...", "name": "Alice", "picture": "https://..." },
+  "lastMessage": { "body": "Hola", "senderId": "...", "createdAt": "..." },
+  "unreadCount": 0,
+  "otherLastReadAt": null,
+  "createdAt": "...",
+  "updatedAt": "..."
+}
+```
+
+`role` is `owner` when the user owns the garden and `requester` otherwise.
+`otherLastReadAt` is when the other side last read the conversation, to show
+"Seen". Garden and participant names are stored when the conversation starts.
+
+A message is `{ id, conversationId, senderId, body, createdAt }`.
+
 ## Errors
 
 Error responses keep Nest's `statusCode`, `message` and `error` fields and add
@@ -89,7 +139,11 @@ a stable `code` that clients can translate instead of showing `message`:
 | `FORBIDDEN`                 | 403    | Generic forbidden.                                |
 | `GARDEN_NOT_OWNED`          | 403    | Editing or deleting someone else's garden.        |
 | `NOT_FOUND`                 | 404    | Unknown route.                                    |
-| `GARDEN_NOT_FOUND`          | 404    | No garden with that id.                           |
+| `GARDEN_NOT_FOUND`          | 404    | No garden with that id (or hidden, when writing to it). |
+| `CANNOT_CONTACT_OWN_GARDEN` | 400    | Starting a conversation about your own garden.    |
+| `INVALID_MESSAGE_CURSOR`    | 400    | `before`/`after` is not a message of that conversation. |
+| `CONVERSATION_NOT_FOUND`    | 404    | No conversation with that id that you take part in. |
+| `GARDEN_HAS_NO_OWNER`       | 409    | Writing to a legacy garden without owner.         |
 | `INTERNAL_ERROR`            | 5xx    | Unexpected server error.                          |
 
 Throw sites name a code by passing `{ message, code }` to the Nest exception
@@ -115,7 +169,8 @@ $ yarn run start:prod
 # unit tests
 $ yarn run test
 
-# e2e tests
+# e2e tests (the app and conversations suites need MongoDB on
+# localhost:27017; set MONGODB_TEST_URI to use another one)
 $ yarn run test:e2e
 
 # test coverage

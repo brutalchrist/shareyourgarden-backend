@@ -400,7 +400,18 @@ describe('GardensController (e2e)', () => {
   });
 
   describe('GET /gardens/:id', () => {
-    it('returns the garden', async () => {
+    it('returns the garden to its owner', async () => {
+      const garden = await createGarden(alice);
+
+      const response = await request(server())
+        .get(`/gardens/${garden.id}`)
+        .set('Authorization', auth(alice))
+        .expect(200);
+
+      expect(response.body).toEqual(garden);
+    });
+
+    it("hides the owner's email from other users", async () => {
       const garden = await createGarden(alice);
 
       const response = await request(server())
@@ -408,7 +419,7 @@ describe('GardensController (e2e)', () => {
         .set('Authorization', auth(bob))
         .expect(200);
 
-      expect(response.body).toEqual(garden);
+      expect(response.body).toEqual({ ...garden, owner: { name: 'Alice' } });
     });
 
     it('returns 404 for an unknown or invalid id', async () => {
@@ -536,9 +547,12 @@ describe('GardensController (e2e)', () => {
         'Legacy',
         'Visible',
       ]);
-      expect(gardens.find((garden) => garden.id === visible.id)).toEqual(
-        visible,
-      );
+      // The public list never carries the owner's email.
+      expect(gardens.find((garden) => garden.id === visible.id)).toEqual({
+        ...visible,
+        owner: { name: 'Alice' },
+      });
+      expect(gardens.every((garden) => !('email' in garden.owner))).toBe(true);
       expect(gardens.find((garden) => garden.name === 'Legacy')).toMatchObject({
         active: true,
         ownerId: null,

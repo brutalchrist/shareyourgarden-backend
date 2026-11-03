@@ -29,7 +29,11 @@ export class GardensService {
     private readonly usersService: UsersService,
   ) {}
 
-  mapEntityToDto(garden: Garden): GardenDto {
+  /**
+   * The owner's email is private: it is only included for the owner
+   * (`includeEmail`), and visitors contact them through conversations.
+   */
+  mapEntityToDto(garden: Garden, { includeEmail = false } = {}): GardenDto {
     const response = new GardenDto();
     response.id = String(garden._id);
     response.name = garden.name;
@@ -38,7 +42,10 @@ export class GardensService {
     response.products = (garden.products ?? []).map(
       ({ name, type, quantity, unit }) => ({ name, type, quantity, unit }),
     );
-    response.owner = { name: garden.owner?.name, email: garden.owner?.email };
+    response.owner = {
+      name: garden.owner?.name,
+      ...(includeEmail ? { email: garden.owner?.email } : {}),
+    };
     response.ownerId = garden.ownerId ? String(garden.ownerId) : null;
     response.location = {
       type: 'Point',
@@ -124,11 +131,17 @@ export class GardensService {
       .sort({ updatedAt: -1 })
       .exec();
 
-    return gardens.map((garden) => this.mapEntityToDto(garden));
+    return gardens.map((garden) =>
+      this.mapEntityToDto(garden, { includeEmail: true }),
+    );
   }
 
-  async findById(id: string): Promise<GardenDto> {
-    return this.mapEntityToDto(await this.findGardenOrFail(id));
+  async findById(user: JwtPayload, id: string): Promise<GardenDto> {
+    const garden = await this.findGardenOrFail(id);
+
+    return this.mapEntityToDto(garden, {
+      includeEmail: this.isOwner(user, garden),
+    });
   }
 
   async create(user: JwtPayload, body: CreateGardenDto): Promise<GardenDto> {
@@ -144,7 +157,7 @@ export class GardensService {
       owner: { name: owner.name || owner.email, email: owner.email },
     });
 
-    return this.mapEntityToDto(garden);
+    return this.mapEntityToDto(garden, { includeEmail: true });
   }
 
   async update(
@@ -157,7 +170,7 @@ export class GardensService {
     garden.set(this.definedFields(body));
     await garden.save();
 
-    return this.mapEntityToDto(garden);
+    return this.mapEntityToDto(garden, { includeEmail: true });
   }
 
   async remove(user: JwtPayload, id: string): Promise<void> {
@@ -187,7 +200,7 @@ export class GardensService {
   ): Promise<Garden> {
     const garden = await this.findGardenOrFail(id);
 
-    if (!garden.ownerId || String(garden.ownerId) !== user.sub) {
+    if (!this.isOwner(user, garden)) {
       throw new ForbiddenException({
         message: 'You do not own this garden',
         code: ErrorCode.GARDEN_NOT_OWNED,
@@ -195,6 +208,10 @@ export class GardensService {
     }
 
     return garden;
+  }
+
+  private isOwner(user: JwtPayload, garden: Garden): boolean {
+    return !!garden.ownerId && String(garden.ownerId) === user.sub;
   }
 
   // Validated DTO instances carry every declared field, so drop the omitted
