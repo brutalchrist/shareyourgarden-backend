@@ -1,26 +1,54 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { GardensDto } from '../dtos/gardens.dto';
+import { isValidObjectId, Model } from 'mongoose';
+import { JwtPayload } from '../../auth/dtos/auth.dto';
+import { UsersService } from '../../users/services/users.service';
+import {
+  CreateGardenDto,
+  GardenDto,
+  UpdateGardenDto,
+} from '../dtos/gardens.dto';
 import { Garden } from '../entities/garden.entity';
 
 type Box = [[number, number], [number, number]];
 
+const escapeRegex = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 @Injectable()
 export class GardensService {
-  constructor(@InjectModel(Garden.name) private gardenModel: Model<Garden>) {}
+  constructor(
+    @InjectModel(Garden.name) private gardenModel: Model<Garden>,
+    private readonly usersService: UsersService,
+  ) {}
 
-  mapEntityToDto(garden: Garden): GardensDto {
-    const response = new GardensDto();
+  mapEntityToDto(garden: Garden): GardenDto {
+    const response = new GardenDto();
     response.id = String(garden._id);
     response.name = garden.name;
-    response.products = garden.products;
-    response.owner = garden.owner;
-    response.location = garden.location;
+    response.description = garden.description;
+    response.active = garden.active ?? true;
+    response.products = (garden.products ?? []).map(
+      ({ name, type, quantity, unit }) => ({ name, type, quantity, unit }),
+    );
+    response.owner = { name: garden.owner?.name, email: garden.owner?.email };
+    response.ownerId = garden.ownerId ? String(garden.ownerId) : null;
+    response.location = {
+      type: 'Point',
+      coordinates: garden.location?.coordinates,
+    };
+    response.createdAt = garden.createdAt;
+    response.updatedAt = garden.updatedAt;
     return response;
   }
 
-  async findGardens(polygon: string, where?: string): Promise<GardensDto[]> {
+  async findGardens(polygon: string, where?: string): Promise<GardenDto[]> {
     let coordinates: number[][];
     try {
       coordinates = JSON.parse(polygon) as number[][];
@@ -52,7 +80,7 @@ export class GardensService {
 
     const boxes = this.viewportToBoxes(coordinates);
 
-    const $regex = `.*${where}.*`;
+    const $regex = escapeRegex(where ?? '');
     const $options = 'i';
 
     const gardens = await this.gardenModel.find({
@@ -61,17 +89,103 @@ export class GardensService {
           $or: [
             { name: { $regex, $options } },
             { 'products.name': { $regex, $options } },
-            { 'products.type': { $regex, $options } },
             { 'owner.name': { $regex, $options } },
           ],
         },
         {
           $or: boxes.map(($box) => ({ location: { $geoWithin: { $box } } })),
         },
+        // Legacy gardens without the field count as active.
+        { active: { $ne: false } },
       ],
     });
 
     return gardens.map((garden) => this.mapEntityToDto(garden));
+  }
+
+  async findMine(user: JwtPayload): Promise<GardenDto[]> {
+    if (!isValidObjectId(user.sub)) {
+      return [];
+    }
+
+    const gardens = await this.gardenModel
+      .find({ ownerId: user.sub })
+      .sort({ updatedAt: -1 })
+      .exec();
+
+    return gardens.map((garden) => this.mapEntityToDto(garden));
+  }
+
+  async findById(id: string): Promise<GardenDto> {
+    return this.mapEntityToDto(await this.findGardenOrFail(id));
+  }
+
+  async create(user: JwtPayload, body: CreateGardenDto): Promise<GardenDto> {
+    const owner = await this.usersService.findById(user.sub);
+
+    if (!owner) {
+      throw new UnauthorizedException();
+    }
+
+    const garden = await this.gardenModel.create({
+      ...this.definedFields(body),
+      ownerId: owner.id,
+      owner: { name: owner.name || owner.email, email: owner.email },
+    });
+
+    return this.mapEntityToDto(garden);
+  }
+
+  async update(
+    user: JwtPayload,
+    id: string,
+    body: UpdateGardenDto,
+  ): Promise<GardenDto> {
+    const garden = await this.findOwnedGardenOrFail(user, id);
+
+    garden.set(this.definedFields(body));
+    await garden.save();
+
+    return this.mapEntityToDto(garden);
+  }
+
+  async remove(user: JwtPayload, id: string): Promise<void> {
+    const garden = await this.findOwnedGardenOrFail(user, id);
+
+    await garden.deleteOne();
+  }
+
+  private async findGardenOrFail(id: string): Promise<Garden> {
+    const garden = isValidObjectId(id)
+      ? await this.gardenModel.findById(id)
+      : null;
+
+    if (!garden) {
+      throw new NotFoundException('Garden not found');
+    }
+
+    return garden;
+  }
+
+  private async findOwnedGardenOrFail(
+    user: JwtPayload,
+    id: string,
+  ): Promise<Garden> {
+    const garden = await this.findGardenOrFail(id);
+
+    if (!garden.ownerId || String(garden.ownerId) !== user.sub) {
+      throw new ForbiddenException('You do not own this garden');
+    }
+
+    return garden;
+  }
+
+  // Validated DTO instances carry every declared field, so drop the omitted
+  // ones before handing them to Mongoose.
+  private definedFields<T extends object>(body: T): Partial<T> {
+    return Object.fromEntries(
+      Object.entries(body).filter(([, value]) => value !== undefined),
+    ) as Partial<T>;
   }
 
   /**
