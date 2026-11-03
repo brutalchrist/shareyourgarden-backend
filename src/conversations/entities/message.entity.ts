@@ -25,3 +25,5 @@ export class Message extends Document {
 
 export const MessageSchema = SchemaFactory.createForClass(Message);
 MessageSchema.index({ conversationId: 1, createdAt: -1, _id: -1 });
+// Counting a sender's recent messages for the rate limit.
+MessageSchema.index({ senderId: 1, createdAt: -1 });

@@ -7,6 +7,10 @@ import { Connection, Types } from 'mongoose';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { HttpExceptionFilter } from './../src/common/filters/http-exception.filter';
+import {
+  MAX_MESSAGES_PER_MINUTE,
+  MAX_NEW_CONVERSATIONS_PER_HOUR,
+} from './../src/conversations/conversations.constants';
 import { ConversationsModule } from './../src/conversations/conversations.module';
 
 // Runs against a real MongoDB (the unique index, upserts and counters are the
@@ -30,6 +34,8 @@ interface ConversationResponse {
   lastMessage: { body: string; senderId: string; createdAt: string } | null;
   unreadCount: number;
   otherLastReadAt: string | null;
+  readOnly: 'blocked' | 'garden-deleted' | null;
+  blockedByMe: boolean;
 }
 
 interface MessageResponse {
@@ -561,6 +567,165 @@ describe('ConversationsController (e2e)', () => {
           .send({ body: ' ' })
           .expect(400),
       );
+    });
+  });
+  describe('blocking', () => {
+    const block = (user: TestUser, id: string, method: 'post' | 'delete') =>
+      request(server())
+        [method](`/conversations/${id}/block`)
+        .set('Authorization', auth(user))
+        .expect(204);
+    const sendStatus = (user: TestUser, id: string) =>
+      request(server())
+        .post(`/conversations/${id}/messages`)
+        .set('Authorization', auth(user))
+        .send({ body: 'Hola' });
+    const view = async (user: TestUser, id: string) =>
+      (await get(user, `/conversations/${id}`)).body as ConversationResponse;
+
+    it('makes the conversation read-only for both sides', async () => {
+      const conversation = await startConversation(bob, north);
+
+      await block(alice, conversation.id, 'post');
+
+      for (const user of [alice, bob]) {
+        const response = await sendStatus(user, conversation.id).expect(403);
+        expect(response.body).toMatchObject({ code: 'USER_BLOCKED' });
+      }
+      expect(await view(alice, conversation.id)).toMatchObject({
+        readOnly: 'blocked',
+        blockedByMe: true,
+      });
+      // The blocked side sees it read-only, without being told who did it.
+      expect(await view(bob, conversation.id)).toMatchObject({
+        readOnly: 'blocked',
+        blockedByMe: false,
+      });
+      const [inBobsInbox] = (await inbox(bob)).conversations;
+      expect(inBobsInbox.readOnly).toBe('blocked');
+      // History stays readable.
+      expect((await messages(bob, conversation.id)).messages).toHaveLength(1);
+    });
+
+    it('applies to the other gardens of the same person', async () => {
+      const conversation = await startConversation(bob, north);
+      await block(alice, conversation.id, 'post');
+
+      const response = await start(bob, { gardenId: south, body: 'Hola' }, 403);
+      expect(response.body).toMatchObject({ code: 'USER_BLOCKED' });
+    });
+
+    it('can only be lifted by whoever blocked', async () => {
+      const conversation = await startConversation(bob, north);
+      await block(alice, conversation.id, 'post');
+
+      await block(bob, conversation.id, 'delete');
+      await sendStatus(bob, conversation.id).expect(403);
+
+      await block(alice, conversation.id, 'delete');
+      await sendStatus(bob, conversation.id).expect(201);
+      expect(await view(alice, conversation.id)).toMatchObject({
+        readOnly: null,
+        blockedByMe: false,
+      });
+    });
+
+    it('does not affect other people', async () => {
+      const conversation = await startConversation(bob, north);
+      await block(alice, conversation.id, 'post');
+
+      await startConversation(carol, north);
+    });
+
+    it("returns 404 for someone else's conversation", async () => {
+      const conversation = await startConversation(bob, north);
+
+      await request(server())
+        .post(`/conversations/${conversation.id}/block`)
+        .set('Authorization', auth(carol))
+        .expect(404);
+    });
+  });
+
+  describe('deleted gardens', () => {
+    it('keeps the conversation readable but closed', async () => {
+      const conversation = await startConversation(bob, north);
+      // What GardensService.remove does.
+      await connection
+        .collection('conversations')
+        .updateOne(
+          { _id: new Types.ObjectId(conversation.id) },
+          { $set: { gardenDeleted: true } },
+        );
+
+      for (const user of [alice, bob]) {
+        const response = await request(server())
+          .post(`/conversations/${conversation.id}/messages`)
+          .set('Authorization', auth(user))
+          .send({ body: 'Hola' })
+          .expect(409);
+        expect(response.body).toMatchObject({ code: 'CONVERSATION_CLOSED' });
+      }
+      const view = (await get(bob, `/conversations/${conversation.id}`))
+        .body as ConversationResponse;
+      expect(view.readOnly).toBe('garden-deleted');
+      expect((await messages(bob, conversation.id)).messages).toHaveLength(1);
+    });
+  });
+
+  describe('rate limits', () => {
+    it('limits new conversations per hour, not messages to existing ones', async () => {
+      const existing = await startConversation(bob, north);
+      const recent = new Date();
+      await connection.collection('conversations').insertMany(
+        Array.from({ length: MAX_NEW_CONVERSATIONS_PER_HOUR - 1 }, () => ({
+          gardenId: new Types.ObjectId(),
+          ownerId: new Types.ObjectId(),
+          requesterId: new Types.ObjectId(bob.id),
+          createdAt: recent,
+        })),
+      );
+
+      const response = await start(bob, { gardenId: south, body: 'Hola' }, 429);
+      expect(response.body).toMatchObject({ code: 'TOO_MANY_CONVERSATIONS' });
+      // Writing to a garden already contacted is not a new conversation.
+      const again = await startConversation(bob, north, 'Otra vez');
+      expect(again.id).toBe(existing.id);
+    });
+
+    it('ignores conversations started more than an hour ago', async () => {
+      const longAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+      await connection.collection('conversations').insertMany(
+        Array.from({ length: MAX_NEW_CONVERSATIONS_PER_HOUR }, () => ({
+          gardenId: new Types.ObjectId(),
+          ownerId: new Types.ObjectId(),
+          requesterId: new Types.ObjectId(bob.id),
+          createdAt: longAgo,
+        })),
+      );
+
+      await startConversation(bob, north);
+    });
+
+    it('limits messages per minute', async () => {
+      const conversation = await startConversation(bob, north);
+      await connection.collection('messages').insertMany(
+        Array.from({ length: MAX_MESSAGES_PER_MINUTE - 1 }, () => ({
+          conversationId: new Types.ObjectId(conversation.id),
+          senderId: new Types.ObjectId(bob.id),
+          body: 'spam',
+          createdAt: new Date(),
+        })),
+      );
+
+      const response = await request(server())
+        .post(`/conversations/${conversation.id}/messages`)
+        .set('Authorization', auth(bob))
+        .send({ body: 'Uno más' })
+        .expect(429);
+      expect(response.body).toMatchObject({ code: 'TOO_MANY_MESSAGES' });
+      // The other side is not affected.
+      await send(alice, conversation.id, 'Hola');
     });
   });
 });

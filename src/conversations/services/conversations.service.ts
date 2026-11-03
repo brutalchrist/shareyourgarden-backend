@@ -1,6 +1,9 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
+  HttpException,
+  HttpStatus,
   Injectable,
   NotFoundException,
   UnauthorizedException,
@@ -11,6 +14,10 @@ import { JwtPayload } from '../../auth/dtos/auth.dto';
 import { ErrorCode } from '../../common/errors';
 import { Garden } from '../../gardens/entities/garden.entity';
 import { UsersService } from '../../users/services/users.service';
+import {
+  MAX_MESSAGES_PER_MINUTE,
+  MAX_NEW_CONVERSATIONS_PER_HOUR,
+} from '../conversations.constants';
 import {
   ConversationDto,
   ConversationsPageDto,
@@ -34,6 +41,13 @@ const DEFAULT_MESSAGES_LIMIT = 30;
 const otherRole = (role: ConversationRole): ConversationRole =>
   role === 'owner' ? 'requester' : 'owner';
 
+interface BlockState {
+  blockedByMe: boolean;
+  blockedByThem: boolean;
+}
+
+const NOT_BLOCKED: BlockState = { blockedByMe: false, blockedByThem: false };
+
 @Injectable()
 export class ConversationsService {
   constructor(
@@ -47,6 +61,7 @@ export class ConversationsService {
   mapConversationToDto(
     conversation: Conversation,
     userId: string,
+    blocks: BlockState = NOT_BLOCKED,
   ): ConversationDto {
     const role = this.roleOf(conversation, userId);
     const other = otherRole(role);
@@ -72,6 +87,13 @@ export class ConversationsService {
         : null,
       unreadCount: conversation[`${role}Unread`] ?? 0,
       otherLastReadAt: conversation[`${other}LastReadAt`] ?? null,
+      // A deleted garden wins: unblocking would not make it writable.
+      readOnly: conversation.gardenDeleted
+        ? 'garden-deleted'
+        : blocks.blockedByMe || blocks.blockedByThem
+          ? 'blocked'
+          : null,
+      blockedByMe: blocks.blockedByMe,
       createdAt: conversation.createdAt,
       updatedAt: conversation.updatedAt,
     };
@@ -131,6 +153,18 @@ export class ConversationsService {
       throw new UnauthorizedException();
     }
 
+    const blocks = await this.blockState(requesterId, garden.ownerId);
+    this.assertNotBlocked(blocks);
+
+    const existing = await this.conversationModel.exists({
+      gardenId: garden._id,
+      requesterId,
+    });
+    if (!existing) {
+      await this.assertUnderConversationLimit(requesterId);
+    }
+    await this.assertUnderMessageLimit(requesterId);
+
     // Two concurrent first messages cannot create two conversations: the
     // filter matches the unique index exactly, so MongoDB retries the losing
     // upsert as an update.
@@ -169,7 +203,7 @@ export class ConversationsService {
       body.body,
     );
 
-    return this.mapConversationToDto(updated.conversation, user.sub);
+    return this.mapConversationToDto(updated.conversation, user.sub, blocks);
   }
 
   async list(
@@ -203,12 +237,21 @@ export class ConversationsService {
       .limit(limit + 1)
       .exec();
 
+    const page = conversations.slice(0, limit);
+    const { blockedByMe, blockedByThem } =
+      await this.usersService.blockRelations(
+        userId,
+        page.map((conversation) => this.otherUserId(conversation, user.sub)),
+      );
+
     return {
-      conversations: conversations
-        .slice(0, limit)
-        .map((conversation) =>
-          this.mapConversationToDto(conversation, user.sub),
-        ),
+      conversations: page.map((conversation) => {
+        const otherId = String(this.otherUserId(conversation, user.sub));
+        return this.mapConversationToDto(conversation, user.sub, {
+          blockedByMe: blockedByMe.has(otherId),
+          blockedByThem: blockedByThem.has(otherId),
+        });
+      }),
       hasMore: conversations.length > limit,
     };
   }
@@ -235,8 +278,12 @@ export class ConversationsService {
 
   async findById(user: JwtPayload, id: string): Promise<ConversationDto> {
     const conversation = await this.findParticipatingOrFail(user, id);
+    const blocks = await this.blockState(
+      this.userObjectId(user),
+      this.otherUserId(conversation, user.sub),
+    );
 
-    return this.mapConversationToDto(conversation, user.sub);
+    return this.mapConversationToDto(conversation, user.sub, blocks);
   }
 
   async listMessages(
@@ -298,14 +345,47 @@ export class ConversationsService {
     body: SendMessageDto,
   ): Promise<MessageDto> {
     const conversation = await this.findParticipatingOrFail(user, id);
+    const senderId = this.userObjectId(user);
+
+    if (conversation.gardenDeleted) {
+      throw new ConflictException({
+        message: 'The garden was deleted; this conversation is read-only',
+        code: ErrorCode.CONVERSATION_CLOSED,
+      });
+    }
+    this.assertNotBlocked(
+      await this.blockState(senderId, this.otherUserId(conversation, user.sub)),
+    );
+    await this.assertUnderMessageLimit(senderId);
+
     const { message } = await this.appendMessage(
       conversation,
       this.roleOf(conversation, user.sub),
-      this.userObjectId(user),
+      senderId,
       body.body,
     );
 
     return this.mapMessageToDto(message);
+  }
+
+  // Blocking is between people, not conversations: it applies to every
+  // conversation between the two, and to new ones.
+  async block(user: JwtPayload, id: string): Promise<void> {
+    const conversation = await this.findParticipatingOrFail(user, id);
+
+    await this.usersService.block(
+      this.userObjectId(user),
+      this.otherUserId(conversation, user.sub),
+    );
+  }
+
+  async unblock(user: JwtPayload, id: string): Promise<void> {
+    const conversation = await this.findParticipatingOrFail(user, id);
+
+    await this.usersService.unblock(
+      this.userObjectId(user),
+      this.otherUserId(conversation, user.sub),
+    );
   }
 
   async markRead(user: JwtPayload, id: string): Promise<void> {
@@ -388,6 +468,77 @@ export class ConversationsService {
     }
 
     return cursor;
+  }
+
+  private async blockState(
+    userId: Types.ObjectId,
+    otherId: Types.ObjectId,
+  ): Promise<BlockState> {
+    const { blockedByMe, blockedByThem } =
+      await this.usersService.blockRelations(userId, [otherId]);
+
+    return {
+      blockedByMe: blockedByMe.has(String(otherId)),
+      blockedByThem: blockedByThem.has(String(otherId)),
+    };
+  }
+
+  // The same error either way, so the blocked person is not told they were
+  // blocked in so many words.
+  private assertNotBlocked(blocks: BlockState): void {
+    if (blocks.blockedByMe || blocks.blockedByThem) {
+      throw new ForbiddenException({
+        message: 'You cannot message this person',
+        code: ErrorCode.USER_BLOCKED,
+      });
+    }
+  }
+
+  private async assertUnderConversationLimit(
+    requesterId: Types.ObjectId,
+  ): Promise<void> {
+    const recent = await this.conversationModel.countDocuments({
+      requesterId,
+      createdAt: { $gt: new Date(Date.now() - 60 * 60 * 1000) },
+    });
+
+    if (recent >= MAX_NEW_CONVERSATIONS_PER_HOUR) {
+      throw new HttpException(
+        {
+          message: 'Too many new conversations; try again later',
+          code: ErrorCode.TOO_MANY_CONVERSATIONS,
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+  }
+
+  private async assertUnderMessageLimit(
+    senderId: Types.ObjectId,
+  ): Promise<void> {
+    const recent = await this.messageModel.countDocuments({
+      senderId,
+      createdAt: { $gt: new Date(Date.now() - 60 * 1000) },
+    });
+
+    if (recent >= MAX_MESSAGES_PER_MINUTE) {
+      throw new HttpException(
+        {
+          message: 'Too many messages; slow down',
+          code: ErrorCode.TOO_MANY_MESSAGES,
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+  }
+
+  private otherUserId(
+    conversation: Conversation,
+    userId: string,
+  ): Types.ObjectId {
+    return this.roleOf(conversation, userId) === 'owner'
+      ? conversation.requesterId
+      : conversation.ownerId;
   }
 
   private roleOf(conversation: Conversation, userId: string): ConversationRole {

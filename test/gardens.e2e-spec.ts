@@ -7,6 +7,7 @@ import { Mongoose, Types } from 'mongoose';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { HttpExceptionFilter } from './../src/common/filters/http-exception.filter';
+import { Conversation } from './../src/conversations/entities/conversation.entity';
 import { Garden, GardenSchema } from './../src/gardens/entities/garden.entity';
 import { GardensModule } from './../src/gardens/gardens.module';
 import { User } from './../src/users/entities/user.entity';
@@ -173,6 +174,12 @@ interface GardenResponse {
   products: { unit?: string }[];
 }
 
+// Conversations are covered by their own suite; here only the call that
+// closes them when a garden is deleted matters.
+const conversationModel = {
+  updateMany: jest.fn().mockResolvedValue({ modifiedCount: 0 }),
+};
+
 describe('GardensController (e2e)', () => {
   let app: INestApplication<App>;
   let gardenModel: FakeGardenModel;
@@ -210,6 +217,8 @@ describe('GardensController (e2e)', () => {
       .useFactory({ factory: () => new FakeGardenModel() })
       .overrideProvider(getModelToken(User.name))
       .useValue({})
+      .overrideProvider(getModelToken(Conversation.name))
+      .useValue(conversationModel)
       .overrideProvider(UsersService)
       .useValue(usersServiceMock)
       .compile();
@@ -234,6 +243,7 @@ describe('GardensController (e2e)', () => {
 
   beforeEach(() => {
     gardenModel.docs = [];
+    conversationModel.updateMany.mockClear();
   });
 
   describe('POST /gardens', () => {
@@ -497,6 +507,10 @@ describe('GardensController (e2e)', () => {
         .expect(204);
 
       expect(gardenModel.docs).toHaveLength(0);
+      const [[filter, update]] = conversationModel.updateMany.mock
+        .calls as unknown as [[{ gardenId: Types.ObjectId }, unknown]];
+      expect(String(filter.gardenId)).toBe(garden.id);
+      expect(update).toEqual({ $set: { gardenDeleted: true } });
     });
 
     it('returns 403 for another user', async () => {

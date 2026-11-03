@@ -1,7 +1,7 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { TokenPayload } from 'google-auth-library';
-import { isValidObjectId, Model } from 'mongoose';
+import { isValidObjectId, Model, Types } from 'mongoose';
 import type { JwtPayload } from '../../auth/dtos/auth.dto';
 import { UpdateUserDto, UserDto } from '../dtos/user.dto';
 import { User } from '../entities/user.entity';
@@ -44,6 +44,49 @@ export class UsersService {
     const user = await this.userModel.findById(id);
 
     return user ? this.mapEntityToDto(user) : null;
+  }
+
+  async block(userId: Types.ObjectId, otherId: Types.ObjectId): Promise<void> {
+    await this.userModel.updateOne(
+      { _id: userId },
+      { $addToSet: { blockedUserIds: otherId } },
+    );
+  }
+
+  async unblock(
+    userId: Types.ObjectId,
+    otherId: Types.ObjectId,
+  ): Promise<void> {
+    await this.userModel.updateOne(
+      { _id: userId },
+      { $pull: { blockedUserIds: otherId } },
+    );
+  }
+
+  /**
+   * Which of `otherIds` the user blocked, and which of them blocked the user,
+   * in two indexed queries whatever the number of ids.
+   */
+  async blockRelations(
+    userId: Types.ObjectId,
+    otherIds: Types.ObjectId[],
+  ): Promise<{ blockedByMe: Set<string>; blockedByThem: Set<string> }> {
+    const [me, blockers] = await Promise.all([
+      this.userModel.findById(userId, { blockedUserIds: 1 }).exec(),
+      otherIds.length > 0
+        ? this.userModel
+            .find(
+              { _id: { $in: otherIds }, blockedUserIds: userId },
+              { _id: 1 },
+            )
+            .exec()
+        : Promise.resolve([]),
+    ]);
+
+    return {
+      blockedByMe: new Set((me?.blockedUserIds ?? []).map(String)),
+      blockedByThem: new Set(blockers.map((user) => String(user._id))),
+    };
   }
 
   async updateMe(user: JwtPayload, body: UpdateUserDto): Promise<UserDto> {
