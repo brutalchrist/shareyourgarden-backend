@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    services:
+      mongodb:
+        image: mongo:8
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      MONGODB_URI: mongodb://localhost:27017/shareyourgarden-ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: yarn
+
+      - run: yarn install --frozen-lockfile
+
+      - name: Lint
+        run: yarn eslint "{src,apps,libs,test}/**/*.ts"
+
+      - name: Build
+        run: yarn build
+
+      - name: Unit tests
+        run: yarn test
+
+      - name: E2E tests
+        run: yarn test:e2e
