@@ -43,8 +43,14 @@ Copy `.env.default` to `.env` and fill in the values.
 | `JWT_SECRET`       | Yes      | Secret used to sign the backend access token (HS256). Generate with `openssl rand -base64 48`. |
 | `CORS_ORIGINS`     | No       | Comma-separated list of allowed web origins. Defaults to `http://localhost:3000`. |
 | `PORT`             | No       | HTTP port. Defaults to `1337`.                                              |
+| `VAPID_PUBLIC_KEY` | No       | Web Push VAPID public key (base64url). Generate a pair with `yarn vapid:generate`. |
+| `VAPID_PRIVATE_KEY`| No       | Web Push VAPID private key (base64url). Keep it secret.                     |
+| `VAPID_SUBJECT`    | No       | Contact for push services, as a `mailto:` URL.                              |
 
 The app does not start if `GOOGLE_CLIENT_ID` or `JWT_SECRET` is missing.
+Without all three `VAPID_*` variables it starts with push notifications off
+(see [Push notifications](#push-notifications)). Keep the same key pair once
+users subscribe: subscriptions are tied to the public key.
 
 ## Authentication
 
@@ -133,6 +139,44 @@ they can unblock. Garden and participant names are stored when the conversation 
 
 A message is `{ id, conversationId, senderId, body, createdAt }`.
 
+## Push notifications
+
+Standard Web Push with VAPID keys, so the installed app hears about new
+messages while it is closed.
+
+| Method | Route | Auth | Description |
+| ------ | ----- | ---- | ----------- |
+| `GET` | `/push/public-key` | No | `{ publicKey }`: the VAPID public key (base64url), for `pushManager.subscribe({ applicationServerKey })`. |
+| `POST` | `/push/subscriptions` | Yes | `{ endpoint, keys: { p256dh, auth }, locale }` (`PushSubscription.toJSON()` plus `"es"` or `"en"`). Saves it (`204`). `endpoint` must be an `https` URL. Subscribing again from the same endpoint, even as another user, takes it over and updates its keys and locale. |
+| `DELETE` | `/push/subscriptions` | Yes | `{ endpoint }`. Removes that subscription if it is yours (`204`). |
+
+All three return `503 PUSH_NOT_CONFIGURED` when the `VAPID_*` variables are
+not set.
+
+When a message is saved, every subscription of the recipient (never the
+sender) gets a push with this JSON payload:
+
+```json
+{
+  "type": "message",
+  "conversationId": "...",
+  "senderName": "Bob",
+  "gardenName": "Huerta Norte",
+  "locale": "es",
+  "unread": 2
+}
+```
+
+`locale` is the one the subscription was saved with, and `unread` is the
+recipient's `unread` from `GET /conversations/summary`, for the app badge.
+The message text is never included, as it would show on lock screens. Pushes
+have a 24 h TTL, `normal` urgency and the conversation id as `topic`, so a
+newer push for the same conversation replaces one still pending.
+
+Sending happens after the message is saved and never fails the request:
+errors are logged, and subscriptions the push service answers `404` or `410`
+for are deleted.
+
 ## Errors
 
 Error responses keep Nest's `statusCode`, `message` and `error` fields and add
@@ -166,6 +210,7 @@ a stable `code` that clients can translate instead of showing `message`:
 | `CONVERSATION_CLOSED`       | 409    | Writing in a conversation about a deleted garden. |
 | `TOO_MANY_CONVERSATIONS`    | 429    | More than 10 new conversations in an hour.        |
 | `TOO_MANY_MESSAGES`         | 429    | More than 20 messages in a minute.                |
+| `PUSH_NOT_CONFIGURED`       | 503    | The server has no VAPID keys, so push is off.     |
 | `INTERNAL_ERROR`            | 5xx    | Unexpected server error.                          |
 
 Throw sites name a code by passing `{ message, code }` to the Nest exception
