@@ -13,6 +13,7 @@ import { isValidObjectId, Model, QueryFilter, Types } from 'mongoose';
 import { JwtPayload } from '../../auth/dtos/auth.dto';
 import { ErrorCode } from '../../common/errors';
 import { Garden } from '../../gardens/entities/garden.entity';
+import { PushService } from '../../push/services/push.service';
 import { UsersService } from '../../users/services/users.service';
 import {
   MAX_MESSAGES_PER_MINUTE,
@@ -56,6 +57,7 @@ export class ConversationsService {
     @InjectModel(Message.name) private messageModel: Model<Message>,
     @InjectModel(Garden.name) private gardenModel: Model<Garden>,
     private readonly usersService: UsersService,
+    private readonly pushService: PushService,
   ) {}
 
   mapConversationToDto(
@@ -257,23 +259,7 @@ export class ConversationsService {
   }
 
   async summary(user: JwtPayload): Promise<ConversationsSummaryDto> {
-    const userId = this.userObjectId(user);
-    const [asOwner, asRequester] = await Promise.all([
-      this.conversationModel
-        .find({ ownerId: userId, ownerUnread: { $gt: 0 } }, { gardenId: 1 })
-        .exec(),
-      this.conversationModel
-        .countDocuments({ requesterId: userId, requesterUnread: { $gt: 0 } })
-        .exec(),
-    ]);
-
-    const byGarden: Record<string, number> = {};
-    for (const { gardenId } of asOwner) {
-      const id = String(gardenId);
-      byGarden[id] = (byGarden[id] ?? 0) + 1;
-    }
-
-    return { unread: asOwner.length + asRequester, byGarden };
+    return this.summaryOf(this.userObjectId(user));
   }
 
   async findById(user: JwtPayload, id: string): Promise<ConversationDto> {
@@ -424,7 +410,48 @@ export class ConversationsService {
       { returnDocument: 'after' },
     );
 
-    return { conversation: updated ?? conversation, message };
+    const result = { conversation: updated ?? conversation, message };
+    // Not awaited: the message is saved whether or not the push goes out.
+    void this.notifyRecipient(result.conversation, role);
+
+    return result;
+  }
+
+  private async summaryOf(
+    userId: Types.ObjectId,
+  ): Promise<ConversationsSummaryDto> {
+    const [asOwner, asRequester] = await Promise.all([
+      this.conversationModel
+        .find({ ownerId: userId, ownerUnread: { $gt: 0 } }, { gardenId: 1 })
+        .exec(),
+      this.conversationModel
+        .countDocuments({ requesterId: userId, requesterUnread: { $gt: 0 } })
+        .exec(),
+    ]);
+
+    const byGarden: Record<string, number> = {};
+    for (const { gardenId } of asOwner) {
+      const id = String(gardenId);
+      byGarden[id] = (byGarden[id] ?? 0) + 1;
+    }
+
+    return { unread: asOwner.length + asRequester, byGarden };
+  }
+
+  // The message text stays out of the push, as it would show on lock screens.
+  private async notifyRecipient(
+    conversation: Conversation,
+    senderRole: ConversationRole,
+  ): Promise<void> {
+    const recipientId = conversation[`${otherRole(senderRole)}Id`];
+
+    await this.pushService.notifyMessage(recipientId, async () => ({
+      type: 'message',
+      conversationId: String(conversation._id),
+      senderName: conversation[senderRole].name,
+      gardenName: conversation.gardenName,
+      unread: (await this.summaryOf(recipientId)).unread,
+    }));
   }
 
   // Someone else's conversation is reported as missing, not forbidden, so
