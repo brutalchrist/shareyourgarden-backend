@@ -41,7 +41,7 @@ Copy `.env.default` to `.env` and fill in the values.
 | `MONGODB_URI`      | No       | MongoDB connection string. Defaults to `mongodb://localhost:27017/shareyourgarden`. |
 | `GOOGLE_CLIENT_ID` | Yes      | OAuth 2.0 Web client ID from Google Cloud Console, used to verify Google ID tokens. |
 | `JWT_SECRET`       | Yes      | Secret used to sign the backend access token (HS256). Generate with `openssl rand -base64 48`. |
-| `CORS_ORIGINS`     | No       | Comma-separated list of allowed web origins. Defaults to `http://localhost:3000`. |
+| `CORS_ORIGINS`     | No       | Comma-separated list of allowed web origins. Defaults to `http://localhost:3000`. `*` matches part of one host label, e.g. `https://deploy-preview-*--shareyourgarden.netlify.app` for Netlify deploy previews. |
 | `PORT`             | No       | HTTP port. Defaults to `1337`.                                              |
 | `VAPID_PUBLIC_KEY` | No       | Web Push VAPID public key (base64url). Generate a pair with `yarn vapid:generate`. |
 | `VAPID_PRIVATE_KEY`| No       | Web Push VAPID private key (base64url). Keep it secret.                     |
