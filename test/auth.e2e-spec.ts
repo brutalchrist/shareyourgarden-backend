@@ -19,6 +19,7 @@ const user = {
   name: 'Jane Doe',
   picture: 'https://example.com/jane.png',
   locale: null,
+  onboardingCompletedAt: null,
 };
 
 const googleClientMock = {

@@ -119,6 +119,7 @@ describe('UsersController (e2e)', () => {
         email: 'jane@example.com',
         name: 'jane',
         locale: null,
+        onboardingCompletedAt: null,
       });
   });
 
@@ -129,6 +130,7 @@ describe('UsersController (e2e)', () => {
         email: 'jane@example.com',
         name: 'jane',
         locale,
+        onboardingCompletedAt: null,
       });
 
       const me = await request(server())
@@ -153,9 +155,29 @@ describe('UsersController (e2e)', () => {
       expect(userModel.docs.get(ids.john)?.locale).toBeNull();
     });
 
+    it('marks the welcome tour as seen and can reset it', async () => {
+      const before = Date.now();
+
+      const done = await patchMe({ onboardingCompleted: true }).expect(200);
+
+      const seenAt = (done.body as { onboardingCompletedAt: string })
+        .onboardingCompletedAt;
+      expect(new Date(seenAt).getTime()).toBeGreaterThanOrEqual(before);
+      expect((done.body as { locale: unknown }).locale).toBeNull();
+
+      const reset = await patchMe({ onboardingCompleted: false }).expect(200);
+
+      expect(
+        (reset.body as { onboardingCompletedAt: unknown })
+          .onboardingCompletedAt,
+      ).toBeNull();
+    });
+
     it.each([
       ['an unsupported locale', { locale: 'fr' }],
       ['a non-string locale', { locale: 1 }],
+      ['a non-boolean onboardingCompleted', { onboardingCompleted: 'yes' }],
+      ['a null onboardingCompleted', { onboardingCompleted: null }],
       ['an unknown field', { locale: 'es', email: 'evil@example.com' }],
     ])('returns 400 VALIDATION_FAILED for %s', async (_, body) => {
       const response = await patchMe(body).expect(400);
