@@ -62,6 +62,8 @@ export class PersonDto {
   name: string;
   // Only sent to the garden's owner.
   email?: string;
+  // The owner's current profile picture, when they have one.
+  picture?: string;
 }
 
 export class LocationDto {

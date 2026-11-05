@@ -21,6 +21,8 @@ export const ErrorCode = {
   CONVERSATION_CLOSED: 'CONVERSATION_CLOSED',
   TOO_MANY_CONVERSATIONS: 'TOO_MANY_CONVERSATIONS',
   TOO_MANY_MESSAGES: 'TOO_MANY_MESSAGES',
+  // The server has no VAPID keys, so Web Push is off.
+  PUSH_NOT_CONFIGURED: 'PUSH_NOT_CONFIGURED',
   // The server has no bucket configured, so photos can't be uploaded.
   IMAGES_DISABLED: 'IMAGES_DISABLED',
   TOO_MANY_UPLOADS: 'TOO_MANY_UPLOADS',

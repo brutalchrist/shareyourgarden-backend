@@ -67,6 +67,7 @@ const conversationModelMock = {
 
 const usersServiceMock = {
   findById: jest.fn(),
+  picturesByIds: jest.fn().mockResolvedValue(new Map()),
 };
 
 const uploadsServiceMock = {
@@ -150,6 +151,21 @@ describe('GardensService', () => {
       const [garden] = await service.findGardens(polygon, 'test');
 
       expect(garden.owner).toEqual({ name: gardenEntityMock.owner.name });
+    });
+
+    it("includes the owner's current picture", async () => {
+      usersServiceMock.picturesByIds.mockResolvedValueOnce(
+        new Map([
+          [String(gardenEntityMock.ownerId), 'https://example.com/a.png'],
+        ]),
+      );
+
+      const [garden] = await service.findGardens(polygon, 'test');
+
+      expect(usersServiceMock.picturesByIds).toHaveBeenCalledWith([
+        String(gardenEntityMock.ownerId),
+      ]);
+      expect(garden.owner.picture).toBe('https://example.com/a.png');
     });
 
     const polygonFrom = (points: number[][]) => JSON.stringify(points);

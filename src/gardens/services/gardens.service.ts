@@ -60,7 +60,13 @@ export class GardensService {
    * The owner's email is private: it is only included for the owner
    * (`includeEmail`), and visitors contact them through conversations.
    */
-  mapEntityToDto(garden: Garden, { includeEmail = false } = {}): GardenDto {
+  mapEntityToDto(
+    garden: Garden,
+    {
+      includeEmail = false,
+      ownerPicture,
+    }: { includeEmail?: boolean; ownerPicture?: string } = {},
+  ): GardenDto {
     const response = new GardenDto();
     response.id = String(garden._id);
     response.name = garden.name;
@@ -79,6 +85,7 @@ export class GardensService {
     response.owner = {
       name: garden.owner?.name,
       ...(includeEmail ? { email: garden.owner?.email } : {}),
+      ...(ownerPicture ? { picture: ownerPicture } : {}),
     };
     response.ownerId = garden.ownerId ? String(garden.ownerId) : null;
     response.location = {
@@ -152,7 +159,18 @@ export class GardensService {
       ],
     });
 
-    return gardens.map((garden) => this.mapEntityToDto(garden));
+    // Read from the users, not stored with the garden, so they stay current.
+    const pictures = await this.usersService.picturesByIds([
+      ...new Set(
+        gardens.flatMap(({ ownerId }) => (ownerId ? [String(ownerId)] : [])),
+      ),
+    ]);
+
+    return gardens.map((garden) =>
+      this.mapEntityToDto(garden, {
+        ownerPicture: pictures.get(String(garden.ownerId)),
+      }),
+    );
   }
 
   async findMine(user: JwtPayload): Promise<GardenDto[]> {

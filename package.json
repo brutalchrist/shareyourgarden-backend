@@ -17,7 +17,8 @@
     "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch",
     "test:cov": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage",
     "test:debug": "node --experimental-vm-modules --inspect-brk node_modules/jest/bin/jest.js --runInBand",
-    "test:e2e": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config ./test/jest-e2e.json"
+    "test:e2e": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config ./test/jest-e2e.json",
+    "vapid:generate": "web-push generate-vapid-keys"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1162.0",
@@ -33,7 +34,8 @@
     "google-auth-library": "^11.3.2",
     "mongoose": "^9.11.4",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.2"
+    "rxjs": "^7.8.2",
+    "web-push": "3.6.7"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.7",
@@ -47,6 +49,7 @@
     "@types/jest": "^30.0.0",
     "@types/node": "^26.6.6",
     "@types/supertest": "^7.2.1",
+    "@types/web-push": "3.6.4",
     "eslint": "^10.14.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.7",
