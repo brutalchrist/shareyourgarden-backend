@@ -9,6 +9,22 @@ import {
 } from '../gardens.constants';
 
 @Schema({ _id: false })
+export class ProductImage {
+  // UUID shared with its files in the bucket (see `gardenImageKey`).
+  @Prop({ required: true })
+  id: string;
+
+  // Of the full-size image.
+  @Prop({ required: true, min: 1 })
+  width: number;
+
+  @Prop({ required: true, min: 1 })
+  height: number;
+}
+
+const ProductImageSchema = SchemaFactory.createForClass(ProductImage);
+
+@Schema({ _id: false })
 export class Product {
   @Prop({ required: true })
   name: string;
@@ -21,6 +37,10 @@ export class Product {
 
   @Prop({ type: String, enum: PRODUCT_UNITS })
   unit?: ProductUnit;
+
+  // The first one is the cover.
+  @Prop({ type: [ProductImageSchema], default: [] })
+  images: ProductImage[];
 }
 
 const ProductSchema = SchemaFactory.createForClass(Product);

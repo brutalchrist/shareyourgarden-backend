@@ -21,6 +21,15 @@ export const ErrorCode = {
   CONVERSATION_CLOSED: 'CONVERSATION_CLOSED',
   TOO_MANY_CONVERSATIONS: 'TOO_MANY_CONVERSATIONS',
   TOO_MANY_MESSAGES: 'TOO_MANY_MESSAGES',
+  // The server has no bucket configured, so photos can't be uploaded.
+  IMAGES_DISABLED: 'IMAGES_DISABLED',
+  TOO_MANY_UPLOADS: 'TOO_MANY_UPLOADS',
+  // A photo id that this user didn't upload, or that a garden already uses.
+  INVALID_IMAGE: 'INVALID_IMAGE',
+  // The photo was reserved but its files never reached the bucket.
+  IMAGE_NOT_UPLOADED: 'IMAGE_NOT_UPLOADED',
+  // The same photo id appears more than once in a garden.
+  DUPLICATE_IMAGE: 'DUPLICATE_IMAGE',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

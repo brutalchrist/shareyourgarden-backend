@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AuthModule } from '../auth/auth.module';
+import { UploadsModule } from '../uploads/uploads.module';
 import { UsersModule } from '../users/users.module';
 import { GardensController } from './controllers/gardens.controller';
 import {
@@ -13,6 +14,7 @@ import { GardensService } from './services/gardens.service';
   imports: [
     AuthModule,
     UsersModule,
+    UploadsModule,
     MongooseModule.forFeature([
       { name: Garden.name, schema: GardenSchema },
       { name: Conversation.name, schema: ConversationSchema },

@@ -6,6 +6,9 @@ import {
 } from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
 import { Test, TestingModule } from '@nestjs/testing';
+import { Types } from 'mongoose';
+import { StorageService } from '../../storage/storage.service';
+import { UploadsService } from '../../uploads/services/uploads.service';
 import { UsersService } from '../../users/services/users.service';
 import {
   gardenDtoMock,
@@ -66,11 +69,45 @@ const usersServiceMock = {
   findById: jest.fn(),
 };
 
+const uploadsServiceMock = {
+  findClaimable: jest.fn(),
+  markClaimed: jest.fn(),
+};
+
+const storageMock = {
+  enabled: true,
+  assertEnabled: jest.fn(),
+  publicUrl: jest.fn((key: string) => `https://img.test/${key}`),
+  headSize: jest.fn(),
+  copy: jest.fn(),
+  deleteKeys: jest.fn(),
+  deletePrefix: jest.fn(),
+};
+
+const imageA = 'a0a0a0a0-0000-4000-8000-000000000001';
+const imageB = 'b0b0b0b0-0000-4000-8000-000000000002';
+const imageC = 'c0c0c0c0-0000-4000-8000-000000000003';
+
+const upload = (imageId: string) => ({
+  imageId,
+  contentType: 'image/webp',
+  width: 1600,
+  height: 1200,
+});
+
 describe('GardensService', () => {
   let service: GardensService;
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    storageMock.enabled = true;
+    storageMock.assertEnabled.mockReset();
+    storageMock.headSize.mockResolvedValue(1000);
+    storageMock.copy.mockResolvedValue(undefined);
+    storageMock.deleteKeys.mockResolvedValue(undefined);
+    storageMock.deletePrefix.mockResolvedValue(undefined);
+    uploadsServiceMock.findClaimable.mockResolvedValue(new Map());
+    uploadsServiceMock.markClaimed.mockResolvedValue(undefined);
 
     const module: TestingModule = await Test.createTestingModule({
       imports: [],
@@ -81,6 +118,8 @@ describe('GardensService', () => {
           useValue: gardenModelMock,
         },
         { provide: UsersService, useValue: usersServiceMock },
+        { provide: UploadsService, useValue: uploadsServiceMock },
+        { provide: StorageService, useValue: storageMock },
         {
           provide: getModelToken(Conversation.name),
           useValue: conversationModelMock,
@@ -360,6 +399,8 @@ describe('GardensService', () => {
       expect(usersServiceMock.findById).toHaveBeenCalledWith(owner.id);
       expect(gardenModelMock.create).toHaveBeenCalledWith({
         ...newGarden,
+        _id: expect.any(Types.ObjectId) as unknown,
+        products: [{ ...newGarden.products[0], images: [] }],
         ownerId: owner.id,
         owner: { name: owner.name, email: owner.email },
       });
@@ -465,6 +506,230 @@ describe('GardensService', () => {
       await expect(service.remove(ownerPayload, garden._id)).rejects.toThrow(
         ForbiddenException,
       );
+    });
+  });
+
+  describe('photos', () => {
+    const product = (images: string[]) => ({
+      name: 'Tomate',
+      type: 'vegetable' as const,
+      quantity: 2,
+      images: images.map((id) => ({ id })),
+    });
+
+    const gardenWithImages = (images: string[]) => ({
+      ...gardenDocument(),
+      products: [
+        {
+          name: 'Tomate',
+          type: 'vegetable',
+          quantity: 2,
+          images: images.map((id) => ({ id, width: 800, height: 600 })),
+        },
+      ],
+    });
+
+    beforeEach(() => {
+      usersServiceMock.findById.mockResolvedValue(owner);
+      gardenModelMock.create.mockImplementation((data: object) =>
+        Promise.resolve({ ...gardenEntityMock, ...data }),
+      );
+    });
+
+    it('returns public URLs for each photo, cover first', () => {
+      const dto = service.mapEntityToDto(
+        gardenWithImages([imageA, imageB]) as never,
+      );
+
+      expect(dto.products[0].images).toEqual([
+        {
+          id: imageA,
+          url: `https://img.test/gardens/${gardenEntityMock._id}/${imageA}/full`,
+          thumbUrl: `https://img.test/gardens/${gardenEntityMock._id}/${imageA}/thumb`,
+          width: 800,
+          height: 600,
+        },
+        expect.objectContaining({ id: imageB }),
+      ]);
+    });
+
+    it('leaves photos out when storage is not configured', () => {
+      storageMock.enabled = false;
+
+      const dto = service.mapEntityToDto(gardenWithImages([imageA]) as never);
+
+      expect(dto.products[0].images).toEqual([]);
+    });
+
+    it('copies new uploads into the garden folder on create', async () => {
+      uploadsServiceMock.findClaimable.mockResolvedValue(
+        new Map([[imageA, upload(imageA)]]),
+      );
+
+      await service.create(ownerPayload, {
+        ...newGarden,
+        products: [product([imageA])],
+      });
+
+      const [data] = gardenModelMock.create.mock.lastCall as [
+        { _id: Types.ObjectId; products: unknown[] },
+      ];
+      const gardenId = String(data._id);
+      expect(uploadsServiceMock.findClaimable).toHaveBeenCalledWith(
+        ownerPayload,
+        [imageA],
+      );
+      expect(storageMock.copy).toHaveBeenCalledWith(
+        `tmp/${imageA}/full`,
+        `gardens/${gardenId}/${imageA}/full`,
+        'image/webp',
+      );
+      expect(storageMock.copy).toHaveBeenCalledWith(
+        `tmp/${imageA}/thumb`,
+        `gardens/${gardenId}/${imageA}/thumb`,
+        'image/webp',
+      );
+      expect(data.products).toEqual([
+        {
+          name: 'Tomate',
+          type: 'vegetable',
+          quantity: 2,
+          images: [{ id: imageA, width: 1600, height: 1200 }],
+        },
+      ]);
+      expect(uploadsServiceMock.markClaimed).toHaveBeenCalledWith(
+        [imageA],
+        data._id,
+      );
+    });
+
+    it("rejects photos that aren't the user's unclaimed uploads", async () => {
+      await expect(
+        service.create(ownerPayload, {
+          ...newGarden,
+          products: [product([imageA])],
+        }),
+      ).rejects.toMatchObject({
+        response: { code: 'INVALID_IMAGE' },
+      });
+      expect(storageMock.copy).not.toHaveBeenCalled();
+      expect(gardenModelMock.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects photos whose files never reached the bucket', async () => {
+      uploadsServiceMock.findClaimable.mockResolvedValue(
+        new Map([[imageA, upload(imageA)]]),
+      );
+      storageMock.headSize.mockImplementation((key: string) =>
+        Promise.resolve(key.endsWith('/thumb') ? null : 1000),
+      );
+
+      await expect(
+        service.create(ownerPayload, {
+          ...newGarden,
+          products: [product([imageA])],
+        }),
+      ).rejects.toMatchObject({
+        response: { code: 'IMAGE_NOT_UPLOADED' },
+      });
+      expect(storageMock.copy).not.toHaveBeenCalled();
+      expect(gardenModelMock.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects the same photo used twice', async () => {
+      await expect(
+        service.create(ownerPayload, {
+          ...newGarden,
+          products: [product([imageA]), { ...product([imageA]), name: 'B' }],
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(gardenModelMock.create).not.toHaveBeenCalled();
+    });
+
+    it('needs storage only when there are new photos', async () => {
+      storageMock.assertEnabled.mockImplementation(() => {
+        throw new Error('disabled');
+      });
+
+      await expect(
+        service.create(ownerPayload, newGarden),
+      ).resolves.toBeDefined();
+      await expect(
+        service.create(ownerPayload, {
+          ...newGarden,
+          products: [product([imageA])],
+        }),
+      ).rejects.toThrow('disabled');
+    });
+
+    it('keeps existing photos, adds new ones and deletes removed ones on update', async () => {
+      const garden = gardenWithImages([imageA, imageB]);
+      gardenModelMock.findById.mockResolvedValue(garden);
+      uploadsServiceMock.findClaimable.mockResolvedValue(
+        new Map([[imageC, upload(imageC)]]),
+      );
+
+      await service.update(ownerPayload, garden._id, {
+        products: [product([imageC, imageA])],
+      });
+
+      expect(uploadsServiceMock.findClaimable).toHaveBeenCalledWith(
+        ownerPayload,
+        [imageC],
+      );
+      expect(garden.set).toHaveBeenCalledWith({
+        products: [
+          {
+            name: 'Tomate',
+            type: 'vegetable',
+            quantity: 2,
+            images: [
+              { id: imageC, width: 1600, height: 1200 },
+              { id: imageA, width: 800, height: 600 },
+            ],
+          },
+        ],
+      });
+      expect(uploadsServiceMock.markClaimed).toHaveBeenCalledWith(
+        [imageC],
+        garden._id,
+      );
+      expect(storageMock.deleteKeys).toHaveBeenCalledWith([
+        `gardens/${garden._id}/${imageB}/full`,
+        `gardens/${garden._id}/${imageB}/thumb`,
+      ]);
+    });
+
+    it('leaves photos alone when the products are not sent', async () => {
+      const garden = gardenWithImages([imageA]);
+      gardenModelMock.findById.mockResolvedValue(garden);
+
+      await service.update(ownerPayload, garden._id, { name: 'Otro' });
+
+      expect(garden.set).toHaveBeenCalledWith({ name: 'Otro' });
+      expect(storageMock.deleteKeys).not.toHaveBeenCalled();
+    });
+
+    it("deletes the garden's photo folder when it is removed", async () => {
+      const garden = gardenDocument();
+      gardenModelMock.findById.mockResolvedValue(garden);
+
+      await service.remove(ownerPayload, garden._id);
+
+      expect(storageMock.deletePrefix).toHaveBeenCalledWith(
+        `gardens/${garden._id}/`,
+      );
+    });
+
+    it('still removes the garden if deleting its photos fails', async () => {
+      const garden = gardenDocument();
+      gardenModelMock.findById.mockResolvedValue(garden);
+      storageMock.deletePrefix.mockRejectedValue(new Error('network'));
+
+      await expect(
+        service.remove(ownerPayload, garden._id),
+      ).resolves.toBeUndefined();
+      expect(garden.deleteOne).toHaveBeenCalled();
     });
   });
 });

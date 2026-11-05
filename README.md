@@ -43,8 +43,16 @@ Copy `.env.default` to `.env` and fill in the values.
 | `JWT_SECRET`       | Yes      | Secret used to sign the backend access token (HS256). Generate with `openssl rand -base64 48`. |
 | `CORS_ORIGINS`     | No       | Comma-separated list of allowed web origins. Defaults to `http://localhost:3000`. |
 | `PORT`             | No       | HTTP port. Defaults to `1337`.                                              |
+| `S3_ENDPOINT`      | No       | S3-compatible endpoint for product photos, e.g. `https://<ACCOUNT_ID>.r2.cloudflarestorage.com` for Cloudflare R2. |
+| `S3_REGION`        | No       | Bucket region. Defaults to `auto` (what R2 expects).                        |
+| `S3_BUCKET`        | No       | Bucket name.                                                                |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | No | Credentials with object read and write access to that bucket only. |
+| `PUBLIC_ASSETS_URL` | No      | Public base URL the bucket's objects are served from, without a trailing slash. |
 
 The app does not start if `GOOGLE_CLIENT_ID` or `JWT_SECRET` is missing.
+Product photos are optional: without all the `S3_*` variables and
+`PUBLIC_ASSETS_URL`, the app starts with photos disabled (see
+[Product photos](#product-photos)).
 
 ## Authentication
 
@@ -71,6 +79,67 @@ browser/system language, the default). The allowed values live in
 `{ name }`. The email is only returned to the garden's owner (`GET
 /gardens/mine`, `GET /gardens/:id`, `POST` and `PATCH`). Visitors contact owners
 through conversations.
+
+## Product photos
+
+Each product can have up to 3 photos; the first one is the cover. Photo bytes
+never pass through the backend. The browser resizes each photo to a full-size
+image (1600 px max) and a 320 px square thumbnail, both WebP or JPEG, and
+uploads them straight to the bucket:
+
+1. `POST /uploads/images` (authenticated) with
+   `{ contentType, fullSize, thumbSize, width, height }`. `contentType` is
+   `image/webp` or `image/jpeg`; sizes are in bytes (full ≤ 1.5 MB, thumbnail
+   ≤ 200 KB) and `width`/`height` are the full image's (≤ 4096). Returns
+   `{ id, full: { url, headers }, thumb: { url, headers }, previewUrl }`.
+2. The browser `PUT`s each file to its `url` with exactly those `headers`. The
+   URLs expire after 10 minutes and only accept the declared type and size.
+   Files land in `tmp/{id}/full` and `tmp/{id}/thumb`; `previewUrl` shows the
+   thumbnail before the garden is saved.
+3. `POST /gardens` or `PATCH /gardens/:id` with `images: [{ id }]` in each
+   product. New ids must be uploads of the same user that no garden has used
+   yet; their files are copied to `gardens/{gardenId}/{id}/full|thumb` before
+   the garden is saved. Photos left out of a `PATCH` that sends `products` are
+   deleted, and deleting a garden deletes its folder.
+
+Products come back with
+`images: [{ id, url, thumbUrl, width, height }]` (an empty list when the
+server has no storage configured).
+
+Errors: `503 IMAGES_DISABLED` (no storage configured), `429 TOO_MANY_UPLOADS`
+(more than 30 uploads per hour), `400 INVALID_IMAGE` (an id that isn't yours
+or is already used), `400 IMAGE_NOT_UPLOADED` (a file is missing from `tmp/`)
+and `400 DUPLICATE_IMAGE` (the same id twice in a garden). Limits live in
+`src/uploads/uploads.constants.ts`.
+
+### Bucket setup
+
+Any S3-compatible bucket works (Cloudflare R2, Backblaze B2, MinIO, AWS S3).
+For R2:
+
+1. Create the bucket and an **Account API token** with **Object Read & Write**
+   on that bucket only. Put its access key, secret and the account endpoint in
+   the `S3_*` variables.
+2. Allow uploads from the web app with a CORS policy:
+
+   ```json
+   [
+     {
+       "AllowedOrigins": ["https://<your-site>", "http://localhost:3000"],
+       "AllowedMethods": ["PUT"],
+       "AllowedHeaders": ["Content-Type", "Content-Length"],
+       "MaxAgeSeconds": 3600
+     }
+   ]
+   ```
+
+3. Add a lifecycle rule that deletes objects under `tmp/` after 1 day, so
+   uploads never saved to a garden go away (their records expire after 24 h).
+4. Make the bucket readable at `PUBLIC_ASSETS_URL`, through a custom domain or
+   a Worker. Saved photos are sent with
+   `Cache-Control: public, max-age=31536000, immutable`.
+
+Use a separate bucket and token for local development.
 
 ## Conversations
 
