@@ -2,34 +2,58 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { isValidObjectId, Model } from 'mongoose';
+import { isValidObjectId, Model, Types } from 'mongoose';
 import { ErrorCode } from '../../common/errors';
 import { JwtPayload } from '../../auth/dtos/auth.dto';
 import { UsersService } from '../../users/services/users.service';
 import {
   CreateGardenDto,
   GardenDto,
+  ProductImageDto,
+  ProductInputDto,
   UpdateGardenDto,
 } from '../dtos/gardens.dto';
 import { Conversation } from '../../conversations/entities/conversation.entity';
-import { Garden } from '../entities/garden.entity';
+import { StorageService } from '../../storage/storage.service';
+import { UploadsService } from '../../uploads/services/uploads.service';
+import {
+  gardenImageKey,
+  gardenImagePrefix,
+  IMAGE_VARIANTS,
+  tmpImageKey,
+} from '../../uploads/uploads.constants';
+import { Garden, Product, ProductImage } from '../entities/garden.entity';
 
 type Box = [[number, number], [number, number]];
+
+// Products as stored, with the photo ids resolved to their dimensions.
+interface ResolvedProducts {
+  products: Product[];
+  // Photos copied from `tmp/` that the garden now uses.
+  addedIds: string[];
+  // Photos the garden had and no longer uses.
+  removedIds: string[];
+}
 
 const escapeRegex = (value: string) =>
   value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 @Injectable()
 export class GardensService {
+  private readonly logger = new Logger(GardensService.name);
+
   constructor(
     @InjectModel(Garden.name) private gardenModel: Model<Garden>,
     @InjectModel(Conversation.name)
     private conversationModel: Model<Conversation>,
     private readonly usersService: UsersService,
+    private readonly uploadsService: UploadsService,
+    private readonly storage: StorageService,
   ) {}
 
   /**
@@ -48,8 +72,15 @@ export class GardensService {
     response.name = garden.name;
     response.description = garden.description;
     response.active = garden.active ?? true;
+    const gardenId = String(garden._id);
     response.products = (garden.products ?? []).map(
-      ({ name, type, quantity, unit }) => ({ name, type, quantity, unit }),
+      ({ name, type, quantity, unit, images }) => ({
+        name,
+        type,
+        quantity,
+        unit,
+        images: this.mapImages(gardenId, images),
+      }),
     );
     response.owner = {
       name: garden.owner?.name,
@@ -172,11 +203,23 @@ export class GardensService {
       throw new UnauthorizedException();
     }
 
+    // The id is needed up front: it names the folder the photos go to.
+    const gardenId = new Types.ObjectId();
+    const { products, addedIds } = await this.resolveProducts(
+      user,
+      gardenId,
+      [],
+      body.products,
+    );
+
     const garden = await this.gardenModel.create({
       ...this.definedFields(body),
+      _id: gardenId,
+      products,
       ownerId: owner.id,
       owner: { name: owner.name || owner.email, email: owner.email },
     });
+    await this.uploadsService.markClaimed(addedIds, gardenId);
 
     return this.mapEntityToDto(garden, { includeEmail: true });
   }
@@ -187,9 +230,26 @@ export class GardensService {
     body: UpdateGardenDto,
   ): Promise<GardenDto> {
     const garden = await this.findOwnedGardenOrFail(user, id);
+    const fields = this.definedFields(body);
+    let resolved: ResolvedProducts | null = null;
 
-    garden.set(this.definedFields(body));
+    if (body.products !== undefined) {
+      resolved = await this.resolveProducts(
+        user,
+        garden._id,
+        garden.products ?? [],
+        body.products,
+      );
+      fields.products = resolved.products;
+    }
+
+    garden.set(fields);
     await garden.save();
+
+    if (resolved) {
+      await this.uploadsService.markClaimed(resolved.addedIds, garden._id);
+      await this.deleteImages(String(garden._id), resolved.removedIds);
+    }
 
     return this.mapEntityToDto(garden, { includeEmail: true });
   }
@@ -203,6 +263,147 @@ export class GardensService {
       { gardenId: garden._id },
       { $set: { gardenDeleted: true } },
     );
+
+    if (this.storage.enabled) {
+      // Best effort: the garden is gone either way.
+      await this.storage
+        .deletePrefix(gardenImagePrefix(String(garden._id)))
+        .catch((error: unknown) =>
+          this.logger.error(`Could not delete photos of garden ${id}`, error),
+        );
+    }
+  }
+
+  /**
+   * Turns the products sent by the owner into stored products. Photo ids the
+   * garden already has keep their dimensions. New ones must be uploads of
+   * this user that no garden claimed yet, with both files in `tmp/`; their
+   * files are copied to the garden's folder before it's saved.
+   */
+  private async resolveProducts(
+    user: JwtPayload,
+    gardenId: Types.ObjectId,
+    current: Product[],
+    input: ProductInputDto[],
+  ): Promise<ResolvedProducts> {
+    const existing = new Map<string, ProductImage>(
+      current.flatMap((product) =>
+        (product.images ?? []).map((image) => [image.id, image] as const),
+      ),
+    );
+    const requestedIds = input.flatMap((product) =>
+      (product.images ?? []).map((image) => image.id),
+    );
+
+    if (new Set(requestedIds).size !== requestedIds.length) {
+      throw new BadRequestException({
+        message: 'The same photo is used more than once',
+        code: ErrorCode.DUPLICATE_IMAGE,
+      });
+    }
+
+    const addedIds = requestedIds.filter((id) => !existing.has(id));
+    const added = new Map<string, ProductImage>();
+
+    if (addedIds.length > 0) {
+      this.storage.assertEnabled();
+      const uploads = await this.uploadsService.findClaimable(user, addedIds);
+      const missing = addedIds.find((id) => !uploads.has(id));
+      if (missing) {
+        throw new BadRequestException({
+          message: `Unknown photo ${missing}`,
+          code: ErrorCode.INVALID_IMAGE,
+        });
+      }
+
+      await Promise.all(
+        addedIds.map(async (id) => {
+          const sizes = await Promise.all(
+            IMAGE_VARIANTS.map((variant) =>
+              this.storage.headSize(tmpImageKey(id, variant)),
+            ),
+          );
+          if (sizes.some((size) => size === null)) {
+            throw new BadRequestException({
+              message: `Photo ${id} was not uploaded`,
+              code: ErrorCode.IMAGE_NOT_UPLOADED,
+            });
+          }
+        }),
+      );
+
+      await Promise.all(
+        addedIds.flatMap((id) => {
+          const upload = uploads.get(id)!;
+          added.set(id, { id, width: upload.width, height: upload.height });
+          return IMAGE_VARIANTS.map((variant) =>
+            this.storage.copy(
+              tmpImageKey(id, variant),
+              gardenImageKey(String(gardenId), id, variant),
+              upload.contentType,
+            ),
+          );
+        }),
+      );
+    }
+
+    const requested = new Set(requestedIds);
+    const products = input.map(({ name, type, quantity, unit, images }) => ({
+      name,
+      type,
+      quantity,
+      ...(unit !== undefined ? { unit } : {}),
+      images: (images ?? []).map(({ id }) => {
+        const image = existing.get(id) ?? added.get(id)!;
+        return { id, width: image.width, height: image.height };
+      }),
+    }));
+
+    return {
+      products,
+      addedIds,
+      removedIds: [...existing.keys()].filter((id) => !requested.has(id)),
+    };
+  }
+
+  // Best effort: a failure leaves unused files behind but the save stands.
+  private async deleteImages(gardenId: string, imageIds: string[]) {
+    if (imageIds.length === 0 || !this.storage.enabled) {
+      return;
+    }
+
+    await this.storage
+      .deleteKeys(
+        imageIds.flatMap((id) =>
+          IMAGE_VARIANTS.map((variant) =>
+            gardenImageKey(gardenId, id, variant),
+          ),
+        ),
+      )
+      .catch((error: unknown) =>
+        this.logger.error(
+          `Could not delete removed photos of garden ${gardenId}`,
+          error,
+        ),
+      );
+  }
+
+  // Without storage there are no URLs to give, so photos are left out.
+  private mapImages(
+    gardenId: string,
+    images: ProductImage[] | undefined,
+  ): ProductImageDto[] {
+    if (!this.storage.enabled) {
+      return [];
+    }
+
+    return (images ?? []).map(({ id, width, height }) => ({
+      id,
+      url: this.storage.publicUrl(gardenImageKey(gardenId, id, 'full'))!,
+      thumbUrl: this.storage.publicUrl(gardenImageKey(gardenId, id, 'thumb'))!,
+      width,
+      height,
+    }));
   }
 
   private async findGardenOrFail(id: string): Promise<Garden> {

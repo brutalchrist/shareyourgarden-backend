@@ -4,12 +4,14 @@ import { JwtService } from '@nestjs/jwt';
 import { getModelToken } from '@nestjs/mongoose';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Mongoose, Types } from 'mongoose';
+import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { HttpExceptionFilter } from './../src/common/filters/http-exception.filter';
 import { Conversation } from './../src/conversations/entities/conversation.entity';
 import { Garden, GardenSchema } from './../src/gardens/entities/garden.entity';
 import { GardensModule } from './../src/gardens/gardens.module';
+import { Upload } from './../src/uploads/entities/upload.entity';
 import { User } from './../src/users/entities/user.entity';
 import { UsersService } from './../src/users/services/users.service';
 
@@ -220,6 +222,10 @@ describe('GardensController (e2e)', () => {
       .useValue({})
       .overrideProvider(getModelToken(Conversation.name))
       .useValue(conversationModel)
+      // No S3_* variables are configured, so photos are disabled and the
+      // upload records are never read.
+      .overrideProvider(getModelToken(Upload.name))
+      .useValue({})
       .overrideProvider(UsersService)
       .useValue(usersServiceMock)
       .compile();
@@ -268,6 +274,36 @@ describe('GardensController (e2e)', () => {
         ],
       });
       expect(garden.id).toEqual(expect.any(String));
+    });
+
+    it('answers 503 for new photos when storage is not configured', async () => {
+      const response = await request(server())
+        .post('/gardens')
+        .set('Authorization', auth(alice))
+        .send({
+          ...gardenBody,
+          products: [
+            {
+              name: 'Tomate',
+              type: 'vegetable',
+              quantity: 3,
+              images: [{ id: randomUUID() }],
+            },
+          ],
+        })
+        .expect(503);
+
+      expect(response.body).toMatchObject({ code: 'IMAGES_DISABLED' });
+      expect(gardenModel.docs).toHaveLength(0);
+    });
+
+    it('returns products without photos as an empty list', async () => {
+      const garden = await createGarden(alice);
+
+      expect(garden.products).toEqual([
+        expect.objectContaining({ name: 'Tomate', images: [] }),
+        expect.objectContaining({ name: 'Menta', images: [] }),
+      ]);
     });
 
     it('uses the email as owner name when the user has none', async () => {
@@ -323,6 +359,29 @@ describe('GardensController (e2e)', () => {
         {
           ...gardenBody,
           products: [{ name: 'A', type: 'fruit', quantity: '1' }],
+        },
+      ],
+      [
+        'more than 3 photos in a product',
+        {
+          ...gardenBody,
+          products: [
+            {
+              name: 'A',
+              type: 'fruit',
+              quantity: 1,
+              images: Array.from({ length: 4 }, () => ({ id: randomUUID() })),
+            },
+          ],
+        },
+      ],
+      [
+        'a photo id that is not a UUID',
+        {
+          ...gardenBody,
+          products: [
+            { name: 'A', type: 'fruit', quantity: 1, images: [{ id: 'x' }] },
+          ],
         },
       ],
       [

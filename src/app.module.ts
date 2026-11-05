@@ -9,6 +9,7 @@ import { ConversationsModule } from './conversations/conversations.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { GardensModule } from './gardens/gardens.module';
 import { PushModule } from './push/push.module';
+import { UploadsModule } from './uploads/uploads.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { PushModule } from './push/push.module';
     ConversationsModule,
     GardensModule,
     PushModule,
+    UploadsModule,
     MongooseModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({

@@ -7,6 +7,7 @@ import {
   IsNumber,
   IsObject,
   IsString,
+  IsUUID,
   Length,
   MaxLength,
   Min,
@@ -20,6 +21,7 @@ import {
   type ProductType,
   type ProductUnit,
 } from '../gardens.constants';
+import { MAX_IMAGES_PER_PRODUCT } from '../../uploads/uploads.constants';
 
 // Like @IsOptional, but only for omitted fields: an explicit null still fails validation.
 const IsOmittable = () => ValidateIf((_, value) => value !== undefined);
@@ -39,11 +41,21 @@ const IsLngLat = () =>
     },
   });
 
+export class ProductImageDto {
+  id: string;
+  url: string;
+  thumbUrl: string;
+  width: number;
+  height: number;
+}
+
 export class ProductDto {
   name: string;
   type: ProductType;
   quantity: number;
   unit?: ProductUnit;
+  // The first one is the cover.
+  images: ProductImageDto[];
 }
 
 export class PersonDto {
@@ -72,6 +84,11 @@ export class GardenDto {
   updatedAt?: Date;
 }
 
+export class ProductImageInputDto {
+  @IsUUID()
+  id: string;
+}
+
 export class ProductInputDto {
   @IsString()
   @Length(1, 60)
@@ -87,6 +104,15 @@ export class ProductInputDto {
   @IsOmittable()
   @IsIn(PRODUCT_UNITS)
   unit?: ProductUnit;
+
+  // Ids from POST /uploads/images, or of photos the garden already has. The
+  // order is kept and the first one is the cover. Omitted means no photos.
+  @IsOmittable()
+  @IsArray()
+  @ArrayMaxSize(MAX_IMAGES_PER_PRODUCT)
+  @ValidateNested({ each: true })
+  @Type(() => ProductImageInputDto)
+  images?: ProductImageInputDto[];
 }
 
 export class LocationInputDto {

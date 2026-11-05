@@ -37,4 +37,5 @@ export const gardenEntityMock = {
 export const gardenDtoMock = {
   id: '67aaccbd70ce46590ad81696',
   ...gardenMock,
+  products: gardenMock.products.map((product) => ({ ...product, images: [] })),
 };
