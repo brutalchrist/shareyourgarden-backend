@@ -17,6 +17,7 @@ export class UsersService {
       name: user.name,
       picture: user.picture,
       locale: user.locale ?? null,
+      onboardingCompletedAt: user.onboardingCompletedAt ?? null,
     };
   }
 
@@ -109,11 +110,21 @@ export class UsersService {
   }
 
   async updateMe(user: JwtPayload, body: UpdateUserDto): Promise<UserDto> {
+    // Omitted fields stay untouched; null is a value (clears locale).
+    const changes: Partial<Pick<User, 'locale' | 'onboardingCompletedAt'>> = {};
+    if (body.locale !== undefined) {
+      changes.locale = body.locale;
+    }
+    if (body.onboardingCompleted !== undefined) {
+      changes.onboardingCompletedAt = body.onboardingCompleted
+        ? new Date()
+        : null;
+    }
+
     const updated = isValidObjectId(user.sub)
       ? await this.userModel.findByIdAndUpdate(
           user.sub,
-          // Omitted fields stay untouched; null is a value (clears locale).
-          { $set: body.locale === undefined ? {} : { locale: body.locale } },
+          { $set: changes },
           { returnDocument: 'after', runValidators: true },
         )
       : null;

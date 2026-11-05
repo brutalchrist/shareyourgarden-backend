@@ -46,6 +46,7 @@ describe('UsersService', () => {
         name: 'Jane Doe',
         picture: undefined,
         locale: null,
+        onboardingCompletedAt: null,
       });
     });
   });
@@ -88,6 +89,55 @@ describe('UsersService', () => {
       expect(userModelMock.findByIdAndUpdate).toHaveBeenCalledWith(
         userId,
         { $set: {} },
+        expect.anything(),
+      );
+    });
+
+    it('marks the welcome tour as seen with the server time', async () => {
+      const before = Date.now();
+      userModelMock.findByIdAndUpdate.mockImplementation(
+        (_id: string, update: { $set: Record<string, unknown> }) =>
+          Promise.resolve(
+            new UserModel({
+              _id: userId,
+              googleId: 'g',
+              email: 'jane@example.com',
+              ...update.$set,
+            }),
+          ),
+      );
+
+      const result = await service.updateMe(jwtPayload, {
+        onboardingCompleted: true,
+      });
+
+      const [, update] = userModelMock.findByIdAndUpdate.mock.calls[0] as [
+        string,
+        { $set: { onboardingCompletedAt: Date } },
+      ];
+      expect(Object.keys(update.$set)).toEqual(['onboardingCompletedAt']);
+      expect(
+        update.$set.onboardingCompletedAt.getTime(),
+      ).toBeGreaterThanOrEqual(before);
+      expect(result.onboardingCompletedAt).toEqual(
+        update.$set.onboardingCompletedAt,
+      );
+    });
+
+    it('clears the welcome tour date with onboardingCompleted false', async () => {
+      userModelMock.findByIdAndUpdate.mockResolvedValue(
+        new UserModel({
+          _id: userId,
+          googleId: 'g',
+          email: 'jane@example.com',
+        }),
+      );
+
+      await service.updateMe(jwtPayload, { onboardingCompleted: false });
+
+      expect(userModelMock.findByIdAndUpdate).toHaveBeenCalledWith(
+        userId,
+        { $set: { onboardingCompletedAt: null } },
         expect.anything(),
       );
     });

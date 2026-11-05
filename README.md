@@ -67,17 +67,21 @@ Product photos are optional too: without all the `S3_*` variables and
 
 Access tokens are HS256 JWTs that expire after 7 days. `GET /gardens` stays public.
 
-The user object is `{ id, email, name, picture, locale }`. `locale` is the
-user's language preference: `"es"`, `"en"` or `null` (follow the
-browser/system language, the default). The allowed values live in
-`src/users/users.constants.ts`.
+The user object is `{ id, email, name, picture, locale, onboardingCompletedAt }`.
+`locale` is the user's language preference: `"es"`, `"en"` or `null` (follow
+the browser/system language, the default). The allowed values live in
+`src/users/users.constants.ts`. `onboardingCompletedAt` is when the user
+finished or skipped the web app's welcome tour (ISO date), or `null` if they
+have not seen it yet, including users created before the field existed.
 
 ## Users
 
 - `PATCH /users/me` with `Authorization: Bearer <accessToken>` and
-  `{ "locale": "es" | "en" | null }` updates the signed-in user and returns it
-  in the same shape as `GET /auth/me`. Omitted fields are left as they are;
-  any other value or unknown field returns `400`.
+  `{ "locale"?: "es" | "en" | null, "onboardingCompleted"?: boolean }` updates
+  the signed-in user and returns it in the same shape as `GET /auth/me`.
+  `onboardingCompleted: true` sets `onboardingCompletedAt` to the server's
+  current time; `false` clears it so the tour shows again. Omitted fields are
+  left as they are; any other value or unknown field returns `400`.
 
 ## Gardens
 

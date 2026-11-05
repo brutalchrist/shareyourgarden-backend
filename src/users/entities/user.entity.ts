@@ -20,6 +20,11 @@ export class User extends Document {
   @Prop({ type: String, enum: [...LOCALES, null], default: null })
   locale: Locale | null;
 
+  // When the user finished or skipped the welcome tour; null (or missing on
+  // older documents) means they have not seen it yet.
+  @Prop({ type: Date, default: null })
+  onboardingCompletedAt: Date | null;
+
   // People this user blocked: neither side can message the other.
   @Prop({ type: [MongooseSchema.Types.ObjectId], default: [] })
   blockedUserIds: Types.ObjectId[];
