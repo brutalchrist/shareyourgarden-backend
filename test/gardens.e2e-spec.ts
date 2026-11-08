@@ -11,6 +11,7 @@ import { HttpExceptionFilter } from './../src/common/filters/http-exception.filt
 import { Conversation } from './../src/conversations/entities/conversation.entity';
 import { Garden, GardenSchema } from './../src/gardens/entities/garden.entity';
 import { GardensModule } from './../src/gardens/gardens.module';
+import { approximateCoordinates } from './../src/gardens/location-privacy';
 import { Upload } from './../src/uploads/entities/upload.entity';
 import { User } from './../src/users/entities/user.entity';
 import { UsersService } from './../src/users/services/users.service';
@@ -175,7 +176,14 @@ interface GardenResponse {
   ownerId: string;
   owner: { name: string; email: string };
   products: { unit?: string }[];
+  location: { type: 'Point'; coordinates: number[] };
 }
+
+// What anyone but the owner sees of a garden's location.
+const approximate = (location: GardenResponse['location']) => ({
+  ...location,
+  coordinates: approximateCoordinates(location.coordinates),
+});
 
 // Conversations are covered by their own suite; here only the call that
 // closes them when a garden is deleted matters.
@@ -489,7 +497,11 @@ describe('GardensController (e2e)', () => {
         .set('Authorization', auth(bob))
         .expect(200);
 
-      expect(response.body).toEqual({ ...garden, owner: { name: 'Alice' } });
+      expect(response.body).toEqual({
+        ...garden,
+        owner: { name: 'Alice' },
+        location: approximate(garden.location),
+      });
     });
 
     it('returns 404 for an unknown or invalid id', async () => {
@@ -624,6 +636,7 @@ describe('GardensController (e2e)', () => {
       // The public list never carries the owner's email.
       expect(gardens.find((garden) => garden.id === visible.id)).toEqual({
         ...visible,
+        location: approximate(visible.location),
         owner: { name: 'Alice' },
       });
       expect(gardens.every((garden) => !('email' in garden.owner))).toBe(true);
