@@ -107,6 +107,14 @@ export class ConversationsService {
       conversationId: String(message.conversationId),
       senderId: String(message.senderId),
       body: message.body,
+      ...(message.sharedLocation
+        ? {
+            sharedLocation: {
+              type: 'Point' as const,
+              coordinates: message.sharedLocation.coordinates,
+            },
+          }
+        : {}),
       createdAt: message.createdAt,
     };
   }
@@ -344,11 +352,17 @@ export class ConversationsService {
     );
     await this.assertUnderMessageLimit(senderId);
 
+    const role = this.roleOf(conversation, user.sub);
+    const sharedLocation = body.shareLocation
+      ? await this.locationToShare(conversation, role)
+      : undefined;
+
     const { message } = await this.appendMessage(
       conversation,
-      this.roleOf(conversation, user.sub),
+      role,
       senderId,
       body.body,
+      sharedLocation,
     );
 
     return this.mapMessageToDto(message);
@@ -384,16 +398,43 @@ export class ConversationsService {
     );
   }
 
+  // The garden's exact point, which only its owner can hand out.
+  private async locationToShare(
+    conversation: Conversation,
+    role: ConversationRole,
+  ) {
+    if (role !== 'owner') {
+      throw new ForbiddenException({
+        message: 'Only the garden owner can share its exact location',
+        code: ErrorCode.SHARE_LOCATION_NOT_ALLOWED,
+      });
+    }
+
+    const garden = await this.gardenModel.findById(conversation.gardenId);
+    const coordinates = garden?.location?.coordinates;
+
+    if (!coordinates) {
+      throw new ConflictException({
+        message: 'The garden was deleted; this conversation is read-only',
+        code: ErrorCode.CONVERSATION_CLOSED,
+      });
+    }
+
+    return { type: 'Point' as const, coordinates: [...coordinates] };
+  }
+
   private async appendMessage(
     conversation: Conversation,
     role: ConversationRole,
     senderId: Types.ObjectId,
     body: string,
+    sharedLocation?: { type: 'Point'; coordinates: number[] },
   ): Promise<{ conversation: Conversation; message: Message }> {
     const message = await this.messageModel.create({
       conversationId: conversation._id,
       senderId,
       body,
+      ...(sharedLocation ? { sharedLocation } : {}),
     });
 
     // Writing implies having read the thread up to here.

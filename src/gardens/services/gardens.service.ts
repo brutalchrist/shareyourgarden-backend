@@ -28,6 +28,7 @@ import {
   tmpImageKey,
 } from '../../uploads/uploads.constants';
 import { Garden, Product, ProductImage } from '../entities/garden.entity';
+import { approximateCoordinates } from '../location-privacy';
 
 type Box = [[number, number], [number, number]];
 
@@ -57,15 +58,16 @@ export class GardensService {
   ) {}
 
   /**
-   * The owner's email is private: it is only included for the owner
-   * (`includeEmail`), and visitors contact them through conversations.
+   * The owner's email and exact location are private: they are only included
+   * for the owner (`isOwner`). Everyone else gets an approximate location, and
+   * visitors contact the owner through conversations.
    */
   mapEntityToDto(
     garden: Garden,
     {
-      includeEmail = false,
+      isOwner = false,
       ownerPicture,
-    }: { includeEmail?: boolean; ownerPicture?: string } = {},
+    }: { isOwner?: boolean; ownerPicture?: string } = {},
   ): GardenDto {
     const response = new GardenDto();
     response.id = String(garden._id);
@@ -84,13 +86,15 @@ export class GardensService {
     );
     response.owner = {
       name: garden.owner?.name,
-      ...(includeEmail ? { email: garden.owner?.email } : {}),
+      ...(isOwner ? { email: garden.owner?.email } : {}),
       ...(ownerPicture ? { picture: ownerPicture } : {}),
     };
     response.ownerId = garden.ownerId ? String(garden.ownerId) : null;
     response.location = {
       type: 'Point',
-      coordinates: garden.location?.coordinates,
+      coordinates: isOwner
+        ? garden.location?.coordinates
+        : approximateCoordinates(garden.location?.coordinates),
     };
     response.createdAt = garden.createdAt;
     response.updatedAt = garden.updatedAt;
@@ -184,7 +188,7 @@ export class GardensService {
       .exec();
 
     return gardens.map((garden) =>
-      this.mapEntityToDto(garden, { includeEmail: true }),
+      this.mapEntityToDto(garden, { isOwner: true }),
     );
   }
 
@@ -192,7 +196,7 @@ export class GardensService {
     const garden = await this.findGardenOrFail(id);
 
     return this.mapEntityToDto(garden, {
-      includeEmail: this.isOwner(user, garden),
+      isOwner: this.isOwner(user, garden),
     });
   }
 
@@ -221,7 +225,7 @@ export class GardensService {
     });
     await this.uploadsService.markClaimed(addedIds, gardenId);
 
-    return this.mapEntityToDto(garden, { includeEmail: true });
+    return this.mapEntityToDto(garden, { isOwner: true });
   }
 
   async update(
@@ -251,7 +255,7 @@ export class GardensService {
       await this.deleteImages(String(garden._id), resolved.removedIds);
     }
 
-    return this.mapEntityToDto(garden, { includeEmail: true });
+    return this.mapEntityToDto(garden, { isOwner: true });
   }
 
   async remove(user: JwtPayload, id: string): Promise<void> {

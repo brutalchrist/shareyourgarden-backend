@@ -18,6 +18,8 @@ import { Conversation } from '../../conversations/entities/conversation.entity';
 import { Garden } from '../entities/garden.entity';
 import { GardensService } from './gardens.service';
 
+import { approximateCoordinates } from '../location-privacy';
+
 const owner = {
   id: gardenEntityMock.ownerId,
   email: 'juan.perez@example.com',
@@ -32,9 +34,14 @@ const strangerPayload = {
 const polygon =
   '[[-71.68216466903688,-35.42395867605907],[-71.65750980377199,-35.42395867605907],[-71.65750980377199,-35.43847037153734],[-71.68216466903688,-35.43847037153734],[-71.68216466903688,-35.42395867605907]]';
 
+// What anyone but the owner gets: no email and an approximate location.
 const publicGardenDto = {
   ...gardenDtoMock,
   owner: { name: gardenDtoMock.owner.name },
+  location: {
+    type: 'Point',
+    coordinates: approximateCoordinates(gardenDtoMock.location.coordinates),
+  },
 };
 
 const newGarden = {
@@ -145,6 +152,14 @@ describe('GardensService', () => {
       const result = await service.findGardens(polygon, 'test');
 
       expect(result).toEqual([publicGardenDto]);
+    });
+
+    it('returns an approximate location, not the exact one', async () => {
+      const [garden] = await service.findGardens(polygon, 'test');
+
+      expect(garden.location.coordinates).not.toEqual(
+        gardenEntityMock.location.coordinates,
+      );
     });
 
     it("does not expose the owner's email", async () => {
@@ -376,6 +391,23 @@ describe('GardensService', () => {
       await expect(
         service.findById(ownerPayload, gardenEntityMock._id),
       ).resolves.toEqual(gardenDtoMock);
+    });
+
+    it('gives the owner the exact location and others an approximate one', async () => {
+      gardenModelMock.findById.mockResolvedValue(gardenEntityMock);
+
+      const own = await service.findById(ownerPayload, gardenEntityMock._id);
+      const other = await service.findById(
+        strangerPayload,
+        gardenEntityMock._id,
+      );
+
+      expect(own.location.coordinates).toEqual(
+        gardenEntityMock.location.coordinates,
+      );
+      expect(other.location.coordinates).not.toEqual(
+        gardenEntityMock.location.coordinates,
+      );
     });
 
     it("hides the owner's email from other users", async () => {

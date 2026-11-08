@@ -5,6 +5,17 @@ import { Conversation } from './conversation.entity';
 
 export const MESSAGE_MAX_LENGTH = 2000;
 
+@Schema({ _id: false })
+export class SharedLocation {
+  @Prop({ required: true, enum: ['Point'], default: 'Point' })
+  type: 'Point';
+
+  @Prop({ type: [Number], required: true })
+  coordinates: number[];
+}
+
+const SharedLocationSchema = SchemaFactory.createForClass(SharedLocation);
+
 @Schema({ timestamps: { createdAt: true, updatedAt: false } })
 export class Message extends Document {
   @Prop({
@@ -19,6 +30,11 @@ export class Message extends Document {
 
   @Prop({ required: true, maxlength: MESSAGE_MAX_LENGTH })
   body: string;
+
+  // The garden's exact point, when its owner chose to share it in this
+  // message. A copy: it does not follow the garden if it moves later.
+  @Prop({ type: SharedLocationSchema })
+  sharedLocation?: SharedLocation;
 
   createdAt: Date;
 }
