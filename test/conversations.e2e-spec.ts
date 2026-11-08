@@ -43,6 +43,7 @@ interface MessageResponse {
   conversationId: string;
   senderId: string;
   body: string;
+  sharedLocation?: { type: 'Point'; coordinates: number[] };
   createdAt: string;
 }
 
@@ -557,6 +558,45 @@ describe('ConversationsController (e2e)', () => {
         senderId: alice.id,
         createdAt: message.createdAt,
       });
+    });
+
+    it('shares the exact location when the owner chooses to', async () => {
+      const conversation = await startConversation(bob, north);
+
+      const message = (
+        await request(server())
+          .post(`/conversations/${conversation.id}/messages`)
+          .set('Authorization', auth(alice))
+          .send({ body: 'Es aquí', shareLocation: true })
+          .expect(201)
+      ).body as MessageResponse;
+
+      expect(message.sharedLocation).toEqual({
+        type: 'Point',
+        coordinates: [-71.66, -35.43],
+      });
+      const [shared] = (await messages(bob, conversation.id)).messages.slice(
+        -1,
+      );
+      expect(shared.sharedLocation?.coordinates).toEqual([-71.66, -35.43]);
+    });
+
+    it('does not attach a location to ordinary messages', async () => {
+      const conversation = await startConversation(bob, north);
+
+      const message = await send(alice, conversation.id, 'Hola');
+
+      expect(message.sharedLocation).toBeUndefined();
+    });
+
+    it('keeps the requester from sharing the garden location', async () => {
+      const conversation = await startConversation(bob, north);
+
+      await request(server())
+        .post(`/conversations/${conversation.id}/messages`)
+        .set('Authorization', auth(bob))
+        .send({ body: 'Hola', shareLocation: true })
+        .expect(403);
     });
 
     it('returns 400 for a blank message', () => {

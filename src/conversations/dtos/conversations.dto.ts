@@ -1,5 +1,6 @@
 import { Transform, Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsIn,
   IsInt,
   IsISO8601,
@@ -69,6 +70,8 @@ export class MessageDto {
   conversationId: string;
   senderId: string;
   body: string;
+  // The garden's exact point, if its owner shared it with this message.
+  sharedLocation?: { type: 'Point'; coordinates: number[] };
   createdAt: Date;
 }
 
@@ -106,6 +109,11 @@ export class SendMessageDto {
   @IsString()
   @Length(1, MESSAGE_MAX_LENGTH)
   body: string;
+
+  // Attaches the garden's exact location. Only its owner can.
+  @IsOmittable()
+  @IsBoolean()
+  shareLocation?: boolean;
 }
 
 export class ListConversationsQueryDto {

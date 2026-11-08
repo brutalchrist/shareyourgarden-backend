@@ -19,6 +19,8 @@ export const ErrorCode = {
   USER_BLOCKED: 'USER_BLOCKED',
   // The garden was deleted, so the conversation is read-only.
   CONVERSATION_CLOSED: 'CONVERSATION_CLOSED',
+  // Only a garden's owner can share its exact location.
+  SHARE_LOCATION_NOT_ALLOWED: 'SHARE_LOCATION_NOT_ALLOWED',
   TOO_MANY_CONVERSATIONS: 'TOO_MANY_CONVERSATIONS',
   TOO_MANY_MESSAGES: 'TOO_MANY_MESSAGES',
   // The server has no VAPID keys, so Web Push is off.
