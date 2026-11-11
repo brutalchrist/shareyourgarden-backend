@@ -202,12 +202,18 @@ describe('GardensService', () => {
         {
           $and: [
             unknown,
-            { $or: { location: { $geoWithin: { $box: unknown } } }[] },
+            {
+              $or: {
+                'location.coordinates': { $geoWithin: { $box: unknown } };
+              }[];
+            },
             unknown,
           ];
         },
       ];
-      return filter.$and[1].$or.map(({ location }) => location.$geoWithin.$box);
+      return filter.$and[1].$or.map(
+        (clause) => clause['location.coordinates'].$geoWithin.$box,
+      );
     };
 
     it('queries a small viewport as a single box', async () => {

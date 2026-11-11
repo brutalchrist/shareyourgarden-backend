@@ -156,7 +156,9 @@ export class GardensService {
           ],
         },
         {
-          $or: boxes.map(($box) => ({ location: { $geoWithin: { $box } } })),
+          $or: boxes.map(($box) => ({
+            'location.coordinates': { $geoWithin: { $box } },
+          })),
         },
         // Legacy gardens without the field count as active.
         { active: { $ne: false } },

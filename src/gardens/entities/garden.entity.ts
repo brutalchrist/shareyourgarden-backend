@@ -73,7 +73,6 @@ export class Garden extends Document {
   @Prop({
     type: MongooseSchema.Types.ObjectId,
     ref: User.name,
-    index: true,
     required: true,
   })
   ownerId?: Types.ObjectId;
@@ -101,4 +100,9 @@ export class Garden extends Document {
 }
 
 export const GardenSchema = SchemaFactory.createForClass(Garden);
+// Validates the GeoJSON on save.
 GardenSchema.index({ location: '2dsphere' });
+// Map viewport search: only a 2d index serves `$box`, not the 2dsphere one.
+GardenSchema.index({ 'location.coordinates': '2d' });
+// "My gardens", most recently updated first.
+GardenSchema.index({ ownerId: 1, updatedAt: -1 });

@@ -66,7 +66,7 @@ const matches = (doc: Record<string, unknown>, filter: Filter): boolean =>
     if (key === '$or') {
       return (condition as Filter[]).some((sub) => matches(doc, sub));
     }
-    if (key === 'location') {
+    if (key === 'location.coordinates') {
       return true;
     }
     const values = valuesAt(doc, key);
